@@ -1,0 +1,5 @@
+# Keep Yazi's text editor aligned with the shell default.
+[opener]
+edit = [
+    { run = '${EDITOR:-nvim} "$@"', block = true, for = "unix" },
+]

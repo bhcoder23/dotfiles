@@ -1,0 +1,65 @@
+return {
+  {
+    "folke/snacks.nvim",
+    opts = {
+      indent = {
+        enabled = true,
+        indent = {
+          enabled = false,
+          only_current = true,
+          only_scope = true,
+          char = "│",
+          hl = {
+            "SnacksIndentRed",
+            "SnacksIndentYellow",
+            "SnacksIndentBlue",
+            "SnacksIndentOrange",
+            "SnacksIndentGreen",
+            "SnacksIndentViolet",
+            "SnacksIndentCyan",
+          },
+        },
+        scope = {
+          enabled = false,
+          -- char = "",
+          -- char = "║",
+          char = "┊",
+          underline = true,
+          only_current = true,
+          hl = {
+            "SnacksIndentScopeRed",
+            "SnacksIndentScopeYellow",
+            "SnacksIndentScopeBlue",
+            "SnacksIndentScopeOrange",
+            "SnacksIndentScopeGreen",
+            "SnacksIndentScopeViolet",
+            "SnacksIndentScopeCyan",
+          },
+        },
+        chunk = {
+          enabled = false,
+          char = {
+            -- corner_top = "┌",
+            -- corner_bottom = "└",
+            corner_top = "╭",
+            corner_bottom = "╰",
+            horizontal = "─",
+            vertical = "│",
+            arrow = ">",
+            -- arrow = "",
+          },
+          only_current = true,
+          hl = {
+            "SnacksIndentChunkRed",
+            "SnacksIndentChunkOrange",
+            "SnacksIndentChunkYellow",
+            "SnacksIndentChunkGreen",
+            "SnacksIndentChunkBlue",
+            "SnacksIndentChunkCyan",
+            "SnacksIndentChunkViolet",
+          },
+        },
+      },
+    },
+  },
+}

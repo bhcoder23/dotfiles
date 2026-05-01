@@ -1,0 +1,6 @@
+# Shared Taskwarrior configuration managed with GNU Stow.
+
+data.location=~/.task
+
+# Keep machine-local or secret overrides outside the repo if needed.
+# include ~/.taskrc.local

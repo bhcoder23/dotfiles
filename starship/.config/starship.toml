@@ -1,0 +1,123 @@
+format = """
+$username\
+$kubernetes\
+$directory\
+$fossil_branch\
+${custom.git_host}\
+$git_branch\
+$git_commit\
+$git_state\
+$git_status\
+$git_metrics\
+$hg_branch\
+$pijul_channel\
+$docker_context\
+$package\
+$buf\
+$bun\
+$c\
+$cmake\
+$container\
+$dart\
+$deno\
+$dotnet\
+$fennel\
+$elixir\
+$elm\
+$erlang\
+$golang\
+$guix_shell\
+$haskell\
+$haxe\
+$helm\
+$java\
+$julia\
+$kotlin\
+$gradle\
+$lua\
+$meson\
+$nim\
+$nodejs\
+$ocaml\
+$perl\
+$php\
+$purescript\
+$python\
+$red\
+$ruby\
+$rust\
+$scala\
+$swift\
+$terraform\
+$vlang\
+$vagrant\
+$zig\
+$nix_shell\
+$conda\
+$meson\
+$aws\
+$gcloud\
+$openstack\
+$env_var\
+$crystal\
+$line_break\
+$jobs\
+$character"""
+
+command_timeout = 3000
+add_newline = false
+
+[battery]
+disabled = true
+
+[hostname]
+disabled = true
+
+[character]
+success_symbol = "[❯](white)"
+error_symbol = "[❯](bright-red)"
+vimcmd_symbol = "[❮](bright-black)"
+vimcmd_visual_symbol = "[❮](magenta)"
+vimcmd_replace_symbol = "[❮](yellow)"
+vimcmd_replace_one_symbol = "[❮](yellow)"
+
+[directory]
+truncation_length = 1
+format = "[$path]($style)[$read_only]($read_only_style) "
+read_only = " "
+truncation_symbol = ""
+fish_style_pwd_dir_length = 0
+
+[git_branch]
+format = "[$symbol$branch]($style) "
+symbol = " "
+
+[git_state]
+format = '\([$state( $progress_current/$progress_total)]($style)\) '
+
+[git_metrics]
+disabled = false
+
+[git_status]
+format = '([\(](bright-black)$untracked$modified$staged$renamed$deleted$conflicted$stashed$ahead_behind[\)](bright-black) )'
+conflicted = '[C ](bright-white bold)[$count](bright-white bold) '
+ahead = '[A ](bright-blue)[$count](bright-white bold) '
+behind = '[B ](white)[$count](bright-white bold) '
+diverged = '[A ](bright-blue)[$ahead_count](bright-white bold)[B ](white)[$behind_count](bright-white) '
+untracked = '[U ](bright-black)[$count](bright-white bold) '
+stashed = '[T ](yellow)[$count](bright-white bold) '
+modified = '[M ](blue)[$count](bright-white bold) '
+staged = '[S ](bright-green)[$count](bright-white bold) '
+renamed = '[R ](bright-cyan)[$count](bright-white bold) '
+deleted = '[D ](bright-red)[$count](bright-white bold) '
+
+[gradle]
+symbol = " "
+
+[custom.git_host]
+command = 'getgithost'
+# directories = [".git"]
+when = 'git rev-parse --is-inside-work-tree 2>/dev/null'
+shell = ["sh", "--norc", "--noprofile"]
+style = "bright-yellow bold"
+format = "[$output]($style) "

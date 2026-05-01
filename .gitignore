@@ -1,0 +1,12 @@
+.DS_Store
+.nvimlog
+__pycache__/
+*.pyc
+agent-tracker/.config/agent-tracker/bin/
+agent-tracker/.config/agent-tracker/run/
+agent-tracker/.config/agent-tracker/.build/
+fish/.config/fish/conf.d/90-env-local.fish
+*.bak
+*.bak.*
+*.log
+*.tmp

@@ -1,0 +1,48 @@
+
+theme = Catppuccin Mocha
+shell-integration = zsh
+shell-integration-features = no-cursor
+
+font-family = "JetBrainsMono Nerd Font"
+font-family-bold = "JetBrainsMono Nerd Font"
+font-family-italic = "JetBrainsMono Nerd Font"
+font-family-bold-italic = "JetBrainsMono Nerd Font"
+
+
+font-style = SemiBold
+font-style-bold = Bold
+font-style-italic = SemiBold Italic
+font-style-bold-italic = Bold Italic
+
+font-size = 18
+
+font-feature = calt
+font-feature = liga
+
+
+adjust-cell-height = -6%
+
+window-padding-y = 0,0
+window-padding-balance = true
+# cursor-style = underline
+cursor-style-blink = true
+cursor-color = #B6F500
+cursor-opacity = 0.85
+
+background-opacity = 0.96
+background-blur-radius = 30
+link-url = true
+macos-titlebar-style = hidden
+copy-on-select = true
+macos-option-as-alt = true
+auto-update = check
+auto-update-channel = tip
+
+cursor-invert-fg-bg = false
+mouse-hide-while-typing = true
+
+keybind = super+i=inspector:toggle
+keybind = super+r=reload_config
+
+# custom-shader = shaders/cursor_blaze_no_trail.glsl
+# custom-shader = shaders/cursor_smear.glsl
