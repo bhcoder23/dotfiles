@@ -204,6 +204,13 @@ tmux kill-server
 
 - Restart current OpenCode pane and resume its saved session: `prefix + O`
 
+### Pane Summary
+
+- 这是 pane 级的一行短状态，不是 workflow 文档，也不是 `Todos`
+- 形态通常是：`[theme] ↳ now`
+- `theme` 表示这块工作整体在干嘛，`now` 表示当前下一步
+- 由 Agent 通过 `set_work_summary` 维护，tmux 标题栏会自动显示
+
 ## Practical Flows
 
 ### Start A New AI Work Session
