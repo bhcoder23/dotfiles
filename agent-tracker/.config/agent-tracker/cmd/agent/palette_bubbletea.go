@@ -1,12 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,8 +16,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
-
-const paletteNoDeviceOption = "__no_device__"
 
 var paletteModalBorder = lipgloss.Border{
 	Top:         "─",
@@ -28,7 +28,6 @@ var paletteModalBorder = lipgloss.Border{
 	BottomRight: "┘",
 }
 
-var paletteDestroyLauncher = launchPaletteDestroyWithConfirm
 var paletteTmuxRunner = runTmux
 var paletteTmuxOutput = runTmuxOutput
 
@@ -42,12 +41,21 @@ type paletteRuntime struct {
 	currentSessionName string
 	currentWindowName  string
 	mainRepoRoot       string
+	currentFlow        paletteFlowContext
+}
+
+type paletteFlowContext struct {
+	Branch     string
+	RepoRoot   string
+	Worktree   string
+	TmuxWindow string
 }
 
 type paletteModel struct {
 	runtime                 *paletteRuntime
 	state                   paletteUIState
 	actions                 []paletteAction
+	workflows               []paletteWorkflowEntry
 	openedAt                time.Time
 	quickSecondaryEscCloses bool
 	width                   int
@@ -298,7 +306,23 @@ func (r *paletteRuntime) reload() error {
 	if r.record != nil {
 		r.agentID = r.record.ID
 	}
-	r.mainRepoRoot = detectPaletteMainRepoRoot(r.currentPath, r.record)
+	r.currentFlow = paletteFlowContext{}
+	if strings.TrimSpace(r.windowID) != "" {
+		branch := strings.TrimSpace(tmuxValue(r.windowID, "#{@flow_branch}"))
+		if !looksLikeTmuxFormatLiteral(branch) && branch != "" {
+			r.currentFlow = paletteFlowContext{
+				Branch:     branch,
+				RepoRoot:   strings.TrimSpace(tmuxValue(r.windowID, "#{@flow_repo_root}")),
+				Worktree:   strings.TrimSpace(tmuxValue(r.windowID, "#{@flow_worktree}")),
+				TmuxWindow: strings.TrimSpace(r.windowID),
+			}
+		}
+	}
+	if strings.TrimSpace(r.currentFlow.RepoRoot) != "" {
+		r.mainRepoRoot = strings.TrimSpace(r.currentFlow.RepoRoot)
+	} else {
+		r.mainRepoRoot = detectPaletteMainRepoRoot(r.currentPath, r.record)
+	}
 	return nil
 }
 
@@ -313,6 +337,17 @@ func (r *paletteRuntime) effectiveAgentID() string {
 		return ""
 	}
 	return sanitizeFeatureName(r.agentID)
+}
+
+func (r *paletteRuntime) hasActiveFlow() bool {
+	return strings.TrimSpace(r.currentFlow.Branch) != "" && strings.TrimSpace(r.currentFlow.RepoRoot) != ""
+}
+
+func (r *paletteRuntime) flowBranchLabel() string {
+	if !r.hasActiveFlow() {
+		return ""
+	}
+	return strings.TrimSpace(r.currentFlow.Branch)
 }
 
 func (r *paletteRuntime) persistRecord(update func(*agentRecord) error) error {
@@ -331,23 +366,15 @@ func (r *paletteRuntime) persistRecord(update func(*agentRecord) error) error {
 }
 
 func (r *paletteRuntime) buildActions() []paletteAction {
-	actions := []paletteAction{
-		{
-			Section:  "Agent",
-			Title:    "Start agent",
-			Subtitle: startAgentSubtitle(r.mainRepoRoot, r.currentPath),
-			Keywords: []string{"agent", "start", "new", "feature", "repo"},
-			Kind:     paletteActionPromptStartAgent,
-			RepoRoot: r.mainRepoRoot,
-		},
-	}
-	if strings.TrimSpace(r.agentID) != "" {
+	actions := []paletteAction{}
+	if strings.TrimSpace(r.mainRepoRoot) != "" {
 		actions = append(actions, paletteAction{
-			Section:  "Agent",
-			Title:    "Destroy agent",
-			Subtitle: "Delete the workspace and close its tmux window",
-			Keywords: []string{"agent", "destroy", "remove", "delete"},
-			Kind:     paletteActionConfirmDestroy,
+			Section:  "Flow",
+			Title:    "Workflows",
+			Subtitle: "Browse, start, resume, and destroy current repo workflows",
+			Keywords: []string{"flow", "workflow", "start", "new", "resume", "destroy", "open", "branch", "worktree"},
+			Kind:     paletteActionOpenWorkflows,
+			RepoRoot: r.mainRepoRoot,
 		})
 	}
 	actions = append(actions,
@@ -389,7 +416,7 @@ func (r *paletteRuntime) buildActions() []paletteAction {
 		paletteAction{
 			Section:  "System",
 			Title:    "Reload tmux config",
-			Subtitle: "Source ~/.config/.tmux.conf",
+			Subtitle: "Source ~/.tmux.conf",
 			Keywords: []string{"tmux", "reload", "config", "source", "refresh"},
 			Kind:     paletteActionReloadTmuxConfig,
 		},
@@ -410,26 +437,84 @@ func (r *paletteRuntime) buildActions() []paletteAction {
 	return actions
 }
 
-func (r *paletteRuntime) runAgentStart(repoRoot, feature, device string, keepWorktree bool) error {
-	repoRoot = r.resolveStartRepoRoot(repoRoot)
-	feature = sanitizeFeatureName(feature)
-	if !isPaletteNoDeviceOption(device) {
-		device = normalizeManagedDeviceID(device)
+func flowRegistryPath() string {
+	return filepath.Join(os.Getenv("HOME"), ".local", "state", "flow", "registry.json")
+}
+
+func loadFlowRegistry() (*flowRegistry, error) {
+	path := flowRegistryPath()
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return &flowRegistry{Version: 1, Workflows: map[string]*flowRecord{}}, nil
 	}
-	if repoRoot == "" {
-		return fmt.Errorf("main repo not found")
+	if err != nil {
+		return nil, err
 	}
-	if feature == "" {
-		return fmt.Errorf("feature name is required")
+	reg := &flowRegistry{}
+	if err := json.Unmarshal(data, reg); err != nil {
+		return nil, err
 	}
-	agentBin := filepath.Join(os.Getenv("HOME"), ".config", "bin", "agent")
-	args := buildAgentStartArgs(feature, device, keepWorktree)
-	cmd := exec.Command(agentBin, args...)
-	cmd.Dir = repoRoot
-	cmd.Stdin = os.Stdin
+	if reg.Workflows == nil {
+		reg.Workflows = map[string]*flowRecord{}
+	}
+	return reg, nil
+}
+
+func flowWorkflowStatus(record *flowRecord) string {
+	if record == nil {
+		return "unknown"
+	}
+	worktree := strings.TrimSpace(record.WorktreePath)
+	if worktree == "" || !fileExists(worktree) {
+		return "orphan"
+	}
+	if windowAlive("", strings.TrimSpace(record.TmuxWindowID)) {
+		return "running"
+	}
+	return "stopped"
+}
+
+func loadPaletteWorkflowEntries(repoRoot, activeBranch string) ([]paletteWorkflowEntry, error) {
+	repoRoot = strings.TrimSpace(repoRoot)
+	reg, err := loadFlowRegistry()
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]paletteWorkflowEntry, 0, len(reg.Workflows))
+	for _, record := range reg.Workflows {
+		if record == nil {
+			continue
+		}
+		if repoRoot != "" && strings.TrimSpace(record.RepoRoot) != repoRoot {
+			continue
+		}
+		entries = append(entries, paletteWorkflowEntry{
+			RepoRoot:        strings.TrimSpace(record.RepoRoot),
+			Branch:          strings.TrimSpace(record.Branch),
+			Status:          flowWorkflowStatus(record),
+			WorktreePath:    strings.TrimSpace(record.WorktreePath),
+			TmuxSessionName: strings.TrimSpace(record.TmuxSessionName),
+			TmuxWindowID:    strings.TrimSpace(record.TmuxWindowID),
+			Active:          strings.TrimSpace(record.Branch) == strings.TrimSpace(activeBranch),
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Branch < entries[j].Branch
+	})
+	return entries, nil
+}
+
+func flowBinPath() string {
+	return filepath.Join(os.Getenv("HOME"), ".local", "bin", "flow")
+}
+
+func runFlowCommand(repoRoot string, args ...string) error {
+	flowBin := flowBinPath()
+	cmd := exec.Command(flowBin, args...)
 	cmd.Env = os.Environ()
-	if strings.TrimSpace(r.windowID) != "" {
-		cmd.Env = append(cmd.Env, "AGENT_TMUX_TARGET_WINDOW="+strings.TrimSpace(r.windowID))
+	cmd.Stdin = os.Stdin
+	if strings.TrimSpace(repoRoot) != "" {
+		cmd.Dir = strings.TrimSpace(repoRoot)
 	}
 	output, err := cmd.CombinedOutput()
 	if err == nil {
@@ -442,63 +527,43 @@ func (r *paletteRuntime) runAgentStart(repoRoot, feature, device string, keepWor
 	return err
 }
 
-func launchPaletteDestroy(agentID string) error {
-	return launchPaletteDestroyWithConfirm(agentID, "")
+func (r *paletteRuntime) runFlowStart(repoRoot, branch string) error {
+	repoRoot = r.resolveStartRepoRoot(repoRoot)
+	branch = strings.TrimSpace(branch)
+	if repoRoot == "" {
+		return fmt.Errorf("main repo not found")
+	}
+	if branch == "" {
+		return fmt.Errorf("branch name is required")
+	}
+	return runFlowCommand(repoRoot, "start", branch)
 }
 
-func launchPaletteDestroyWithConfirm(agentID string, confirmText string) error {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		return fmt.Errorf("no agent found for this tmux window")
+func (r *paletteRuntime) runFlowResume(repoRoot, branch string) error {
+	repoRoot = r.resolveStartRepoRoot(repoRoot)
+	branch = strings.TrimSpace(branch)
+	if repoRoot == "" {
+		return fmt.Errorf("main repo not found")
 	}
-	if _, err := loadDestroyTarget(agentID); err != nil {
-		return err
+	if branch == "" {
+		return fmt.Errorf("branch name is required")
 	}
-	extraArgs := ""
-	if strings.TrimSpace(confirmText) != "" {
-		extraArgs = fmt.Sprintf(" --confirm %s", shellQuote(strings.TrimSpace(confirmText)))
-	}
-	if os.Getenv("TMUX") != "" {
-		exe, err := os.Executable()
-		if err != nil {
-			return err
+	return runFlowCommand(repoRoot, "resume", branch)
+}
+
+func (r *paletteRuntime) runFlowDestroy(repoRoot, branch string) error {
+	repoRoot = r.resolveStartRepoRoot(repoRoot)
+	branch = strings.TrimSpace(branch)
+	if branch != "" {
+		if repoRoot == "" {
+			return fmt.Errorf("main repo not found")
 		}
-		return runTmux("run-shell", "-b", fmt.Sprintf("%s destroy --id %s%s", shellQuote(exe), shellQuote(agentID), extraArgs))
+		return runFlowCommand(repoRoot, "destroy", branch)
 	}
-	args := []string{"destroy", "--id", agentID}
-	if strings.TrimSpace(confirmText) != "" {
-		args = append(args, "--confirm", strings.TrimSpace(confirmText))
+	if !r.hasActiveFlow() {
+		return fmt.Errorf("current window is not a managed workflow")
 	}
-	return spawnDetachedAgentCommand(args...)
-}
-
-func buildAgentStartArgs(feature, device string, keepWorktree bool) []string {
-	args := []string{"start"}
-	if keepWorktree {
-		args = append(args, "--keep-worktree")
-	}
-	if isPaletteNoDeviceOption(device) {
-		args = append(args, "--no-device")
-	} else if device != "" {
-		args = append(args, "-d", device)
-	}
-	return append(args, feature)
-}
-
-func isPaletteNoDeviceOption(device string) bool {
-	return strings.TrimSpace(device) == paletteNoDeviceOption
-}
-
-func startAgentPromptDevices(repoRoot string) ([]string, int) {
-	repoRoot = strings.TrimSpace(repoRoot)
-	devices := loadManagedDevices()
-	if len(devices) == 0 {
-		devices = []string{defaultManagedDeviceID}
-	}
-	if repoRoot != "" && fileExists(filepath.Join(repoRoot, "pubspec.yaml")) {
-		return append([]string{paletteNoDeviceOption}, devices...), 1
-	}
-	return devices, 0
+	return runFlowCommand(r.currentFlow.RepoRoot, "destroy", "--window-id", r.currentFlow.TmuxWindow)
 }
 
 func (r *paletteRuntime) resolveStartRepoRoot(repoRoot string) string {
@@ -523,22 +588,6 @@ func (r *paletteRuntime) resolveStartRepoRoot(repoRoot string) string {
 	return ""
 }
 
-func (r *paletteRuntime) startSourceBranch(repoRoot string) string {
-	repoRoot = r.resolveStartRepoRoot(repoRoot)
-	if repoRoot == "" {
-		return ""
-	}
-	repoCfg, err := loadRepoConfigOrDefault(repoRoot)
-	if err != nil {
-		return detectDefaultBaseBranch(repoRoot)
-	}
-	return resolveStartSourceBranch(repoRoot, repoCfg)
-}
-
-func (r *paletteRuntime) canStartAgent(repoRoot string) bool {
-	return strings.TrimSpace(r.resolveStartRepoRoot(repoRoot)) != ""
-}
-
 func (r *paletteRuntime) runActivityMonitor() error {
 	return runBubbleTeaActivityMonitor(r.windowID)
 }
@@ -547,27 +596,23 @@ func (r *paletteRuntime) execute(result paletteResult) (bool, string, error) {
 	action := result.Action
 	text := strings.TrimSpace(result.Input)
 	switch action.Kind {
-	case paletteActionPromptStartAgent:
-		if err := r.runAgentStart(action.RepoRoot, text, result.Device, result.KeepWorktree); err != nil {
+	case paletteActionPromptStartFlow:
+		if err := r.runFlowStart(action.RepoRoot, text); err != nil {
 			return true, "", err
 		}
 		return false, "", nil
-	case paletteActionConfirmDestroy:
-		agentID := r.effectiveAgentID()
-		if agentID == "" {
-			return true, "", fmt.Errorf("no agent found for this tmux window")
+	case paletteActionResumeFlow:
+		if err := r.runFlowResume(action.RepoRoot, text); err != nil {
+			return true, "", err
 		}
-		confirmText := ""
-		if result.State.ConfirmRequiresText {
-			confirmText = strings.TrimSpace(result.Input)
-		}
-		err := paletteDestroyLauncher(agentID, confirmText)
-		if err != nil {
+		return false, "", nil
+	case paletteActionFlowDestroy:
+		if err := r.runFlowDestroy(action.RepoRoot, text); err != nil {
 			return true, "", err
 		}
 		return false, "", nil
 	case paletteActionReloadTmuxConfig:
-		return false, "", paletteTmuxRunner("source-file", os.Getenv("HOME")+"/.config/.tmux.conf")
+		return false, "", paletteTmuxRunner("source-file", os.Getenv("HOME")+"/.tmux.conf")
 	default:
 		return false, "", nil
 	}
@@ -636,10 +681,10 @@ func newPaletteModel(runtime *paletteRuntime, state paletteUIState) *paletteMode
 	}
 	state.FilterCursor = clampInt(state.FilterCursor, 0, len(state.Filter))
 	state.PromptCursor = clampInt(state.PromptCursor, 0, len(state.PromptText))
-	if len(state.PromptDevices) > 0 {
-		state.PromptDeviceIndex = clampInt(state.PromptDeviceIndex, 0, len(state.PromptDevices)-1)
-	}
 	model := &paletteModel{runtime: runtime, state: state, actions: runtime.buildActions(), openedAt: time.Now()}
+	if state.Mode == paletteModeWorkflows {
+		_ = model.openWorkflowList()
+	}
 	if state.Mode == paletteModeTodos {
 		_ = model.openTodosPanel()
 	}
@@ -690,6 +735,27 @@ func (m *paletteModel) openTodosPanel() error {
 	}
 	m.todo.showAltHints = false
 	m.state.Mode = paletteModeTodos
+	m.state.Message = ""
+	m.state.ShowAltHints = false
+	return nil
+}
+
+func (m *paletteModel) openWorkflowList() error {
+	m.noteSecondaryPageOpen()
+	repoRoot := strings.TrimSpace(m.runtime.resolveStartRepoRoot(m.runtime.mainRepoRoot))
+	if repoRoot == "" {
+		return fmt.Errorf("main repo not found")
+	}
+	workflows, err := loadPaletteWorkflowEntries(repoRoot, m.runtime.flowBranchLabel())
+	if err != nil {
+		return err
+	}
+	m.workflows = workflows
+	m.state.Mode = paletteModeWorkflows
+	m.state.Filter = nil
+	m.state.FilterCursor = 0
+	m.state.Selected = 0
+	m.state.WorkflowOffset = 0
 	m.state.Message = ""
 	m.state.ShowAltHints = false
 	return nil
@@ -941,6 +1007,8 @@ func (m *paletteModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updatePrompt(key)
 		case paletteModeConfirmDestroy:
 			return m.updateConfirm(key)
+		case paletteModeWorkflows:
+			return m.updateWorkflows(key)
 		case paletteModeSnippets:
 			return m.updateSnippets(key)
 		case paletteModeSnippetVars:
@@ -948,6 +1016,9 @@ func (m *paletteModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			return m.updateList(key)
 		}
+	}
+	if m.state.Mode == paletteModeWorkflows {
+		return m, nil
 	}
 	if m.state.Mode == paletteModeActivity && m.activity != nil {
 		model, cmd := m.activity.Update(msg)
@@ -1051,7 +1122,7 @@ func (m *paletteModel) updateList(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if key == "alt+c" {
-		m.openPrompt(palettePromptStartAgent, "", m.runtime.mainRepoRoot)
+		m.openPrompt(palettePromptStartFlow, "", m.runtime.mainRepoRoot, paletteModeList)
 		return m, nil
 	}
 	actions := m.filteredActions()
@@ -1068,13 +1139,15 @@ func (m *paletteModel) updateList(key string) (tea.Model, tea.Cmd) {
 		}
 		m.state.Selected = next
 	}
-	switch key {
-	case "ctrl+u", "alt+u", "up":
+	if isAgentCtrlPrevKey(key) || isAgentAltPrevKey(key) || key == "up" {
 		navigate(-1)
 		return m, nil
-	case "ctrl+e", "alt+e", "down":
+	}
+	if isAgentCtrlNextKey(key) || isAgentAltNextKey(key) || key == "down" {
 		navigate(1)
 		return m, nil
+	}
+	switch key {
 	case "ctrl+n", "left":
 		m.state.FilterCursor = clampInt(m.state.FilterCursor-1, 0, len(m.state.Filter))
 		return m, nil
@@ -1097,22 +1170,27 @@ func (m *paletteModel) updateList(key string) (tea.Model, tea.Cmd) {
 
 func (m *paletteModel) selectAction(action paletteAction) (tea.Model, tea.Cmd) {
 	switch action.Kind {
-	case paletteActionPromptStartAgent:
-		m.openPrompt(palettePromptStartAgent, "", action.RepoRoot)
+	case paletteActionPromptStartFlow:
+		m.openPrompt(palettePromptStartFlow, "", action.RepoRoot, paletteModeList)
 		return m, nil
-	case paletteActionConfirmDestroy:
-		target, err := loadDestroyTarget(m.runtime.effectiveAgentID())
-		if err != nil {
+	case paletteActionOpenWorkflows:
+		if err := m.openWorkflowList(); err != nil {
 			m.state.Message = err.Error()
+			return m, nil
+		}
+		return m, nil
+	case paletteActionFlowDestroy:
+		if !m.runtime.hasActiveFlow() {
+			m.state.Message = "Current window is not a managed workflow"
 			m.state.Mode = paletteModeList
 			return m, nil
 		}
-		m.state.Mode = paletteModeConfirmDestroy
-		m.state.Message = ""
-		m.state.ShowAltHints = false
-		m.state.ConfirmRequiresText = target.RequiresExplicitConfirm
-		m.state.PromptText = nil
-		m.state.PromptCursor = 0
+		m.openWorkflowDestroyConfirm(paletteWorkflowEntry{
+			RepoRoot:     strings.TrimSpace(m.runtime.currentFlow.RepoRoot),
+			Branch:       strings.TrimSpace(m.runtime.currentFlow.Branch),
+			TmuxWindowID: strings.TrimSpace(m.runtime.currentFlow.TmuxWindow),
+			Active:       true,
+		}, paletteModeList)
 		return m, nil
 	case paletteActionOpenActivityMonitor:
 		cmd, err := m.openActivityPanel()
@@ -1149,126 +1227,51 @@ func (m *paletteModel) selectAction(action paletteAction) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m *paletteModel) openPrompt(kind palettePromptKind, initial string, repoRoot string) {
-	devices := []string(nil)
-	deviceIndex := 0
-	if kind == palettePromptStartAgent {
-		resolvedRepoRoot := strings.TrimSpace(m.runtime.resolveStartRepoRoot(repoRoot))
-		devices, deviceIndex = startAgentPromptDevices(resolvedRepoRoot)
-	}
+func (m *paletteModel) openPrompt(kind palettePromptKind, initial string, repoRoot string, returnMode paletteMode) {
 	m.state.Mode = paletteModePrompt
 	m.state.PromptKind = kind
-	m.state.PromptField = palettePromptFieldName
 	m.state.PromptText = []rune(initial)
 	m.state.PromptCursor = len(m.state.PromptText)
 	m.state.PromptRepoRoot = strings.TrimSpace(repoRoot)
-	m.state.PromptDevices = devices
-	m.state.PromptDeviceIndex = deviceIndex
-	m.state.PromptKeepWorktree = false
+	m.state.PromptReturnMode = returnMode
 	m.state.ShowAltHints = false
 	m.state.Message = ""
 }
 
+func (m *paletteModel) openWorkflowDestroyConfirm(workflow paletteWorkflowEntry, returnMode paletteMode) {
+	m.state.Mode = paletteModeConfirmDestroy
+	m.state.Message = ""
+	m.state.ShowAltHints = false
+	m.state.ConfirmRequiresText = false
+	m.state.ConfirmRepoRoot = strings.TrimSpace(workflow.RepoRoot)
+	m.state.ConfirmBranch = strings.TrimSpace(workflow.Branch)
+	m.state.ConfirmWindowID = strings.TrimSpace(workflow.TmuxWindowID)
+	m.state.ConfirmReturnMode = returnMode
+	m.state.PromptText = nil
+	m.state.PromptCursor = 0
+}
+
 func (m *paletteModel) updatePrompt(key string) (tea.Model, tea.Cmd) {
 	if key == "esc" {
-		m.state.Mode = paletteModeList
+		m.state.Mode = m.state.PromptReturnMode
 		m.state.Message = ""
 		return m, nil
 	}
-	if m.state.PromptKind == palettePromptStartAgent {
-		if !m.runtime.canStartAgent(m.state.PromptRepoRoot) {
-			return m, nil
-		}
-		if key == "alt+d" || key == "alt+D" || key == "alt+shift+d" {
-			deviceCount := len(m.state.PromptDevices)
-			if deviceCount == 0 {
-				resolvedRepoRoot := strings.TrimSpace(m.runtime.resolveStartRepoRoot(m.state.PromptRepoRoot))
-				m.state.PromptDevices, m.state.PromptDeviceIndex = startAgentPromptDevices(resolvedRepoRoot)
-				deviceCount = len(m.state.PromptDevices)
-			}
-			if deviceCount > 0 {
-				selected := clampInt(m.state.PromptDeviceIndex, 0, deviceCount-1)
-				if key == "alt+d" {
-					m.state.PromptDeviceIndex = (selected + 1) % deviceCount
-				} else {
-					m.state.PromptDeviceIndex = (selected - 1 + deviceCount) % deviceCount
-				}
-			}
-			return m, nil
-		}
-		switch key {
-		case "tab", "ctrl+i":
-			switch m.state.PromptField {
-			case palettePromptFieldName:
-				m.state.PromptField = palettePromptFieldDevice
-			case palettePromptFieldDevice:
-				m.state.PromptField = palettePromptFieldWorktree
-			default:
-				m.state.PromptField = palettePromptFieldName
-			}
-			return m, nil
-		case "shift+tab":
-			switch m.state.PromptField {
-			case palettePromptFieldWorktree:
-				m.state.PromptField = palettePromptFieldDevice
-			case palettePromptFieldDevice:
-				m.state.PromptField = palettePromptFieldName
-			default:
-				m.state.PromptField = palettePromptFieldWorktree
-			}
-			return m, nil
-		}
-		if m.state.PromptField == palettePromptFieldDevice {
-			deviceCount := len(m.state.PromptDevices)
-			if deviceCount == 0 {
-				m.state.PromptDevices = []string{defaultManagedDeviceID}
-				deviceCount = 1
-			}
-			switch key {
-			case "ctrl+n", "left", "n":
-				m.state.PromptDeviceIndex = clampInt(m.state.PromptDeviceIndex-1, 0, deviceCount-1)
-				return m, nil
-			case "right", "i":
-				m.state.PromptDeviceIndex = clampInt(m.state.PromptDeviceIndex+1, 0, deviceCount-1)
-				return m, nil
-			}
-		}
-		if m.state.PromptField == palettePromptFieldWorktree {
-			switch key {
-			case "ctrl+n", "left", "n":
-				m.state.PromptKeepWorktree = false
-				return m, nil
-			case "right", "i":
-				m.state.PromptKeepWorktree = true
-				return m, nil
-			case " ", "space":
-				m.state.PromptKeepWorktree = !m.state.PromptKeepWorktree
-				return m, nil
-			}
-		}
-	}
 	if key == "enter" {
 		text := strings.TrimSpace(string(m.state.PromptText))
-		if m.state.PromptKind == palettePromptStartAgent && text == "" {
-			m.state.Message = "Feature name is required"
+		if text == "" {
+			m.state.Message = "Branch name is required"
 			m.state.Mode = paletteModeList
 			return m, nil
 		}
 		action := paletteAction{}
 		switch m.state.PromptKind {
-		case palettePromptStartAgent:
-			action = paletteAction{Kind: paletteActionPromptStartAgent, RepoRoot: m.state.PromptRepoRoot}
-		}
-		device := ""
-		if m.state.PromptKind == palettePromptStartAgent && m.state.PromptDeviceIndex >= 0 && m.state.PromptDeviceIndex < len(m.state.PromptDevices) {
-			device = m.state.PromptDevices[m.state.PromptDeviceIndex]
+		case palettePromptStartFlow:
+			action = paletteAction{Kind: paletteActionPromptStartFlow, RepoRoot: m.state.PromptRepoRoot}
 		}
 		m.state.Mode = paletteModeList
-		m.result = paletteResult{Kind: paletteResultRunAction, Action: action, Input: text, Device: device, KeepWorktree: m.state.PromptKeepWorktree, State: m.state}
+		m.result = paletteResult{Kind: paletteResultRunAction, Action: action, Input: text, State: m.state}
 		return m, tea.Quit
-	}
-	if m.state.PromptKind == palettePromptStartAgent && m.state.PromptField != palettePromptFieldName {
-		return m, nil
 	}
 	applyPaletteInputKey(key, &m.state.PromptText, &m.state.PromptCursor, true)
 	return m, nil
@@ -1276,7 +1279,7 @@ func (m *paletteModel) updatePrompt(key string) (tea.Model, tea.Cmd) {
 
 func (m *paletteModel) updateConfirm(key string) (tea.Model, tea.Cmd) {
 	if key == "esc" {
-		m.state.Mode = paletteModeList
+		m.state.Mode = m.state.ConfirmReturnMode
 		m.state.ConfirmRequiresText = false
 		m.state.PromptText = nil
 		m.state.PromptCursor = 0
@@ -1288,21 +1291,91 @@ func (m *paletteModel) updateConfirm(key string) (tea.Model, tea.Cmd) {
 				m.state.Message = "Type destroy to confirm"
 				return m, nil
 			}
-			m.state.Mode = paletteModeList
-			m.result = paletteResult{Kind: paletteResultRunAction, Action: paletteAction{Kind: paletteActionConfirmDestroy}, Input: strings.TrimSpace(string(m.state.PromptText)), State: m.state}
+			m.state.Mode = m.state.ConfirmReturnMode
+			m.result = paletteResult{
+				Kind:   paletteResultRunAction,
+				Action: paletteAction{Kind: paletteActionFlowDestroy, RepoRoot: m.state.ConfirmRepoRoot},
+				Input:  m.state.ConfirmBranch,
+				State:  m.state,
+			}
 			return m, tea.Quit
 		}
 		applyPaletteInputKey(key, &m.state.PromptText, &m.state.PromptCursor, true)
 		return m, nil
 	}
 	if key == "y" || key == "Y" {
-		m.state.Mode = paletteModeList
+		m.state.Mode = m.state.ConfirmReturnMode
 		m.state.ConfirmRequiresText = false
-		m.result = paletteResult{Kind: paletteResultRunAction, Action: paletteAction{Kind: paletteActionConfirmDestroy}, State: m.state}
+		m.result = paletteResult{
+			Kind:   paletteResultRunAction,
+			Action: paletteAction{Kind: paletteActionFlowDestroy, RepoRoot: m.state.ConfirmRepoRoot},
+			Input:  m.state.ConfirmBranch,
+			State:  m.state,
+		}
 		return m, tea.Quit
 	}
-	m.state.Mode = paletteModeList
+	m.state.Mode = m.state.ConfirmReturnMode
 	m.state.ConfirmRequiresText = false
+	return m, nil
+}
+
+func (m *paletteModel) updateWorkflows(key string) (tea.Model, tea.Cmd) {
+	if key == "esc" || key == "ctrl+c" {
+		m.state.Mode = paletteModeList
+		m.state.Message = ""
+		return m, nil
+	}
+	workflows := m.filteredWorkflows()
+	navigate := func(delta int) {
+		if len(workflows) == 0 {
+			m.state.Selected = 0
+			return
+		}
+		m.state.Selected = clampInt(m.state.Selected+delta, 0, len(workflows)-1)
+	}
+	if isAgentCtrlPrevKey(key) || key == "up" {
+		navigate(-1)
+		return m, nil
+	}
+	if isAgentCtrlNextKey(key) || key == "down" {
+		navigate(1)
+		return m, nil
+	}
+	switch key {
+	case "ctrl+n", "left":
+		m.state.FilterCursor = clampInt(m.state.FilterCursor-1, 0, len(m.state.Filter))
+		return m, nil
+	case "ctrl+i", "tab", "right":
+		m.state.FilterCursor = clampInt(m.state.FilterCursor+1, 0, len(m.state.Filter))
+		return m, nil
+	case "ctrl+a":
+		m.openPrompt(palettePromptStartFlow, "", m.runtime.mainRepoRoot, paletteModeWorkflows)
+		return m, nil
+	case "ctrl+d":
+		if len(workflows) == 0 || m.state.Selected < 0 || m.state.Selected >= len(workflows) {
+			return m, nil
+		}
+		m.openWorkflowDestroyConfirm(workflows[m.state.Selected], paletteModeWorkflows)
+		return m, nil
+	case "enter", "ctrl+r":
+		if len(workflows) == 0 || m.state.Selected < 0 || m.state.Selected >= len(workflows) {
+			return m, nil
+		}
+		selected := workflows[m.state.Selected]
+		m.state.Mode = paletteModeList
+		m.result = paletteResult{
+			Kind:   paletteResultRunAction,
+			Action: paletteAction{Kind: paletteActionResumeFlow, RepoRoot: selected.RepoRoot},
+			Input:  selected.Branch,
+			State:  m.state,
+		}
+		return m, tea.Quit
+	}
+	if applyPaletteInputKey(key, &m.state.Filter, &m.state.FilterCursor, false) {
+		m.state.Selected = 0
+		m.state.WorkflowOffset = 0
+		m.state.Message = ""
+	}
 	return m, nil
 }
 
@@ -1320,13 +1393,15 @@ func (m *paletteModel) updateSnippets(key string) (tea.Model, tea.Cmd) {
 		}
 		m.state.Selected = clampInt(m.state.Selected+delta, 0, len(snippets)-1)
 	}
-	switch key {
-	case "ctrl+u", "up":
+	if isAgentCtrlPrevKey(key) || key == "up" {
 		navigate(-1)
 		return m, nil
-	case "ctrl+e", "down":
+	}
+	if isAgentCtrlNextKey(key) || key == "down" {
 		navigate(1)
 		return m, nil
+	}
+	switch key {
 	case "ctrl+n", "left":
 		m.state.FilterCursor = clampInt(m.state.FilterCursor-1, 0, len(m.state.Filter))
 		return m, nil
@@ -1444,6 +1519,9 @@ func (m *paletteModel) View() string {
 		}
 		return styles.muted.Render("Activity monitor unavailable")
 	}
+	if m.state.Mode == paletteModeWorkflows {
+		return m.renderWorkflows(styles, width, height)
+	}
 	if m.state.Mode == paletteModeSnippets {
 		return m.renderSnippets(styles, width, height)
 	}
@@ -1485,6 +1563,39 @@ func (m *paletteModel) View() string {
 	return m.renderListView(styles, width, height)
 }
 
+func (m *paletteModel) renderWorkflows(styles paletteStyles, width, height int) string {
+	workflows := m.filteredWorkflows()
+	if len(workflows) == 0 {
+		m.state.Selected = 0
+	} else {
+		m.state.Selected = clampInt(m.state.Selected, 0, len(workflows)-1)
+	}
+	header := styles.title.Render("Workflows")
+	filterLine := styles.searchBox.Width(width).Render(
+		lipgloss.JoinHorizontal(lipgloss.Center,
+			styles.searchPrompt.Render(">"),
+			" ",
+			styles.input.Render(renderInputValue(m.state.Filter, m.state.FilterCursor, styles)),
+		),
+	)
+	contentHeight := maxInt(8, height-7)
+	listWidth := maxInt(34, width*52/100)
+	previewWidth := maxInt(28, width-listWidth-3)
+	list := m.renderWorkflowList(styles, workflows, listWidth, contentHeight)
+	preview := m.renderWorkflowPreview(styles, workflows, previewWidth, contentHeight)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, list, strings.Repeat(" ", 3), preview)
+	footer := renderPaletteModeFooter(styles, width, m.state.Message, m.state.ShowAltHints,
+		[][][2]string{
+			{{"Ctrl-K/J", "move"}, {"Type", "filter"}, {"Ctrl-A", "new"}, {"Enter/Ctrl-R", "resume"}, {"Ctrl-D", "destroy"}, {"Esc", "back"}},
+			{{"Ctrl-K/J", "move"}, {"Ctrl-A", "new"}, {"Enter", "resume"}, {"Ctrl-D", "destroy"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
+			{{"Ctrl-A", "new"}, {"Enter", "resume"}, {"Ctrl-D", "destroy"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
+		},
+		[][][2]string{{{"Alt-S", "close"}, {footerHintToggleKey, "hide"}}, {{"Alt-S", "close"}}},
+	)
+	view := lipgloss.JoinVertical(lipgloss.Left, header, "", filterLine, "", body, "", footer)
+	return lipgloss.NewStyle().Width(width).Height(height).Padding(0, 1).Render(view)
+}
+
 func (m *paletteModel) renderListView(styles paletteStyles, width, height int) string {
 	actions := m.filteredActions()
 	if len(actions) == 0 {
@@ -1493,7 +1604,9 @@ func (m *paletteModel) renderListView(styles paletteStyles, width, height int) s
 		m.state.Selected = clampInt(m.state.Selected, 0, len(actions)-1)
 	}
 	title := "Command Palette"
-	if m.runtime.record != nil {
+	if m.runtime.hasActiveFlow() {
+		title = title + "  " + styles.keyword.Render(m.runtime.flowBranchLabel())
+	} else if m.runtime.record != nil {
 		title = title + "  " + styles.keyword.Render(m.runtime.record.ID)
 	}
 	metaParts := []string{}
@@ -1623,6 +1736,14 @@ func (r *paletteRuntime) sidebarTrackerStatus() (contextSummary, agentSummary, b
 	} else {
 		contextSummary = strings.Join(contextParts, "  ·  ")
 	}
+	if r.hasActiveFlow() {
+		agentSummary = "flow/" + r.currentFlow.Branch
+		bootstrapSummary = "ready"
+		if strings.TrimSpace(r.currentFlow.Worktree) != "" && !fileExists(r.currentFlow.Worktree) {
+			bootstrapSummary = "worktree missing"
+		}
+		return contextSummary, agentSummary, bootstrapSummary
+	}
 	if r.record == nil {
 		agentID := r.effectiveAgentID()
 		if agentID == "" {
@@ -1720,8 +1841,9 @@ func readPaletteBootstrapFailure(workspaceRoot string) string {
 func (m *paletteModel) renderPrompt(styles paletteStyles, width, height int) string {
 	title := "Input"
 	detail := "Enter a value"
-	if m.state.PromptKind == palettePromptStartAgent {
-		title = "Start agent"
+	if m.state.PromptKind == palettePromptStartFlow {
+		title = "Start workflow"
+		detail = "Enter a branch name"
 		repoRoot := blankIfEmpty(m.runtime.resolveStartRepoRoot(m.state.PromptRepoRoot), "Main repo not found")
 		if repoRoot == "Main repo not found" {
 			body := lipgloss.JoinVertical(lipgloss.Left,
@@ -1736,59 +1858,27 @@ func (m *paletteModel) renderPrompt(styles paletteStyles, width, height int) str
 			box := styles.modal.Width(minInt(72, maxInt(36, width-10))).Render(body)
 			return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 		}
-		sourceBranch := blankIfEmpty(m.runtime.startSourceBranch(m.state.PromptRepoRoot), "Unavailable")
-		devices := m.state.PromptDevices
-		if len(devices) == 0 {
-			devices = []string{defaultManagedDeviceID}
-		}
-		nameLabel := styles.modalHint.Render("NAME")
-		deviceLabel := styles.modalHint.Render("DEVICE")
-		worktreeLabel := styles.modalHint.Render("WORKTREE")
-		if m.state.PromptField == palettePromptFieldName {
-			nameLabel = styles.selectedLabel.Render("NAME")
-		} else if m.state.PromptField == palettePromptFieldDevice {
-			deviceLabel = styles.selectedLabel.Render("DEVICE")
-		} else {
-			worktreeLabel = styles.selectedLabel.Render("WORKTREE")
-		}
-		deviceChips := make([]string, 0, len(devices))
-		for idx, deviceID := range devices {
-			deviceChips = append(deviceChips, renderPaletteDeviceChip(styles, deviceID, idx == clampInt(m.state.PromptDeviceIndex, 0, len(devices)-1)))
-		}
-		worktreeChips := []string{
-			renderPaletteDeviceChip(styles, "CLEAR", !m.state.PromptKeepWorktree),
-			renderPaletteDeviceChip(styles, "KEEP", m.state.PromptKeepWorktree),
-		}
+		nameLabel := styles.selectedLabel.Render("BRANCH")
 		body := lipgloss.JoinVertical(lipgloss.Left,
 			styles.modalTitle.Render(title),
 			styles.modalBody.Render(repoRoot),
 			"",
-			styles.modalHint.Render("BRANCH"),
-			styles.modalBody.Render(sourceBranch),
-			"",
 			nameLabel,
 			styles.input.Render(renderInputValue(m.state.PromptText, m.state.PromptCursor, styles)),
 			"",
-			deviceLabel,
-			styles.modalBody.Render(strings.Join(deviceChips, " ")),
-			"",
-			worktreeLabel,
-			styles.modalBody.Render(strings.Join(worktreeChips, " ")),
-			"",
+			styles.modalHint.Render(detail),
 			styles.modalHint.Render(renderPaletteHintLine(styles, minInt(64, maxInt(28, width-18)), m.state.ShowAltHints,
 				[][][2]string{
-					{{"Enter", "create"}, {"Tab", "focus"}, {"n/i", "choose"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
-					{{"Enter", "create"}, {"n/i", "choose"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
+					{{"Enter", "run"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
 					{{"Esc", "back"}, {footerHintToggleKey, "more"}},
 				},
 				[][][2]string{
-					{{"Alt-D", "next"}, {"Alt-Shift-D", "prev"}, {"Alt-S", "close"}, {footerHintToggleKey, "hide"}},
-					{{"Alt-D", "next"}, {"Alt-S", "close"}, {footerHintToggleKey, "hide"}},
+					{{"Alt-S", "close"}, {footerHintToggleKey, "hide"}},
 					{{"Alt-S", "close"}},
 				},
 			)),
 		)
-		box := styles.modal.Width(minInt(84, maxInt(40, width-10))).Render(body)
+		box := styles.modal.Width(minInt(72, maxInt(40, width-10))).Render(body)
 		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 	}
 	body := lipgloss.JoinVertical(lipgloss.Left,
@@ -1807,16 +1897,21 @@ func (m *paletteModel) renderPrompt(styles paletteStyles, width, height int) str
 }
 
 func (m *paletteModel) renderConfirm(styles paletteStyles, width, height int) string {
-	agentID := "this agent"
+	agentID := "this workflow"
 	detail := "Remove " + agentID + " and close its tmux window?"
+	title := "Destroy workflow"
 	hint := renderPaletteHintLine(styles, minInt(52, maxInt(20, width-18)), m.state.ShowAltHints,
 		[][][2]string{{{"y", "confirm"}, {"Esc", "cancel"}, {footerHintToggleKey, "more"}}, {{"Esc", "cancel"}, {footerHintToggleKey, "more"}}},
 		[][][2]string{{{"Alt-S", "close"}, {footerHintToggleKey, "hide"}}, {{"Alt-S", "close"}}},
 	)
-	if m.runtime.record != nil {
-		agentID = m.runtime.record.ID
-		detail = "Remove " + agentID + " and close its tmux window?"
-		if windowID := activeAgentWindowID(m.runtime.record); windowID != "" {
+	if branch := strings.TrimSpace(m.state.ConfirmBranch); branch != "" {
+		agentID = branch
+		if strings.TrimSpace(m.state.ConfirmWindowID) != "" {
+			detail = "Remove " + agentID + " and close its tmux window?"
+		} else {
+			detail = "Remove " + agentID + " and delete its worktree?"
+		}
+		if windowID := strings.TrimSpace(m.state.ConfirmWindowID); windowID != "" {
 			if openTodos, err := countOpenTmuxTodos(todoScopeWindow, windowID); err == nil && openTodos > 0 {
 				label := "todos"
 				if openTodos == 1 {
@@ -1829,6 +1924,26 @@ func (m *paletteModel) renderConfirm(styles paletteStyles, width, height int) st
 				)
 			}
 		}
+	} else if m.runtime.hasActiveFlow() {
+		agentID = m.runtime.currentFlow.Branch
+		detail = "Remove " + agentID + " and close its tmux window?"
+		if windowID := strings.TrimSpace(m.runtime.currentFlow.TmuxWindow); windowID != "" {
+			if openTodos, err := countOpenTmuxTodos(todoScopeWindow, windowID); err == nil && openTodos > 0 {
+				label := "todos"
+				if openTodos == 1 {
+					label = "todo"
+				}
+				detail = fmt.Sprintf("Close %d open window %s before destroying %s.", openTodos, label, agentID)
+				hint = renderPaletteHintLine(styles, minInt(52, maxInt(20, width-18)), m.state.ShowAltHints,
+					[][][2]string{{{"Esc", "cancel"}, {footerHintToggleKey, "more"}}},
+					[][][2]string{{{"Alt-S", "close"}, {footerHintToggleKey, "hide"}}, {{"Alt-S", "close"}}},
+				)
+			}
+		}
+	} else if m.runtime.record != nil {
+		title = "Destroy agent"
+		agentID = m.runtime.record.ID
+		detail = "Remove " + agentID + " and close its tmux window?"
 	}
 	if m.state.ConfirmRequiresText {
 		detail = detail + " Uncommitted changes detected; type destroy to continue."
@@ -1838,7 +1953,7 @@ func (m *paletteModel) renderConfirm(styles paletteStyles, width, height int) st
 		)
 	}
 	body := lipgloss.JoinVertical(lipgloss.Left,
-		styles.modalTitle.Render("Destroy agent"),
+		styles.modalTitle.Render(title),
 		styles.modalBody.Render(detail),
 		func() string {
 			if !m.state.ConfirmRequiresText {
@@ -1882,8 +1997,8 @@ func (m *paletteModel) renderSnippets(styles paletteStyles, width, height int) s
 
 	footer := renderPaletteModeFooter(styles, width, m.state.Message, m.state.ShowAltHints,
 		[][][2]string{
-			{{"Ctrl-U/E", "move"}, {"Ctrl-N/I", "filter"}, {"Enter", "paste"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
-			{{"Ctrl-U/E", "move"}, {"Enter", "paste"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
+			{{"Ctrl-K/J", "move"}, {"Ctrl-N/I", "filter"}, {"Enter", "paste"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
+			{{"Ctrl-K/J", "move"}, {"Enter", "paste"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
 			{{"Enter", "paste"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
 		},
 		[][][2]string{{{"Alt-S", "close"}, {footerHintToggleKey, "hide"}}, {{"Alt-S", "close"}}},
@@ -1998,6 +2113,34 @@ func (m *paletteModel) renderSnippetVars(styles paletteStyles, width, height int
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
+func (m *paletteModel) filteredWorkflows() []paletteWorkflowEntry {
+	query := strings.ToLower(strings.TrimSpace(string(m.state.Filter)))
+	if query == "" {
+		return m.workflows
+	}
+	parts := strings.Fields(query)
+	filtered := make([]paletteWorkflowEntry, 0, len(m.workflows))
+	for _, workflow := range m.workflows {
+		haystack := strings.ToLower(strings.Join([]string{
+			workflow.Branch,
+			workflow.Status,
+			workflow.TmuxSessionName,
+			workflow.WorktreePath,
+		}, " "))
+		matched := true
+		for _, part := range parts {
+			if !strings.Contains(haystack, part) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			filtered = append(filtered, workflow)
+		}
+	}
+	return filtered
+}
+
 func (m *paletteModel) filteredActions() []paletteAction {
 	query := strings.ToLower(strings.TrimSpace(string(m.state.Filter)))
 	if query == "" {
@@ -2019,6 +2162,92 @@ func (m *paletteModel) filteredActions() []paletteAction {
 		}
 	}
 	return filtered
+}
+
+func (m *paletteModel) renderWorkflowList(styles paletteStyles, workflows []paletteWorkflowEntry, width, height int) string {
+	entriesPerPage := maxInt(1, (height-2)/3)
+	selected := clampInt(m.state.Selected, 0, maxInt(0, len(workflows)-1))
+	offset := stableListOffset(m.state.WorkflowOffset, selected, entriesPerPage, len(workflows))
+	m.state.WorkflowOffset = offset
+
+	blocks := []string{styles.meta.Render(fmt.Sprintf("%d workflows", len(workflows))), ""}
+	if len(workflows) == 0 {
+		blocks = append(blocks, styles.muted.Width(width).Render("No matching workflows"))
+	} else {
+		for row := 0; row < entriesPerPage; row++ {
+			idx := offset + row
+			if idx >= len(workflows) {
+				break
+			}
+			workflow := workflows[idx]
+			statusStyle := styles.sectionLabel
+			titleStyle := styles.itemTitle
+			subtle := styles.itemSubtitle
+			box := styles.item
+			rowStyle := lipgloss.NewStyle().Width(maxInt(16, width-2))
+			fillStyle := lipgloss.NewStyle()
+			markerText := "  "
+			markerStyle := styles.muted
+			if idx == selected {
+				selectedBG := lipgloss.Color("238")
+				statusStyle = styles.selectedLabel.Background(selectedBG)
+				titleStyle = styles.itemTitle.Background(selectedBG).Foreground(lipgloss.Color("230"))
+				subtle = styles.selectedSubtle.Background(selectedBG)
+				box = styles.selectedItem
+				rowStyle = rowStyle.Background(selectedBG).Foreground(lipgloss.Color("230"))
+				fillStyle = fillStyle.Background(selectedBG).Foreground(lipgloss.Color("230"))
+				markerText = "› "
+				markerStyle = styles.selectedLabel.Background(selectedBG)
+			}
+			statusLabel := strings.ToUpper(workflow.Status)
+			if workflow.Active {
+				statusLabel = "ACTIVE"
+			}
+			innerWidth := maxInt(16, width-2)
+			statusWidth := lipgloss.Width(statusLabel)
+			markerWidth := lipgloss.Width(markerText)
+			titleWidth := maxInt(10, innerWidth-markerWidth-statusWidth-1)
+			titleText := truncate(workflow.Branch, titleWidth)
+			gapWidth := maxInt(1, innerWidth-markerWidth-lipgloss.Width(titleText)-statusWidth)
+			titleRow := rowStyle.Render(
+				markerStyle.Render(markerText) +
+					titleStyle.Render(titleText) +
+					fillStyle.Render(strings.Repeat(" ", gapWidth)) +
+					statusStyle.Render(statusLabel),
+			)
+			subtitleText := workflow.TmuxSessionName
+			if subtitleText == "" {
+				subtitleText = workflow.WorktreePath
+			}
+			subtitleRow := rowStyle.Render(fillStyle.Render(strings.Repeat(" ", markerWidth)) + subtle.Render(truncate(subtitleText, maxInt(0, innerWidth-markerWidth))))
+			block := lipgloss.JoinVertical(lipgloss.Left, titleRow, subtitleRow)
+			blocks = append(blocks, box.Width(width).Render(block))
+		}
+	}
+	content := strings.Join(blocks, "\n")
+	return lipgloss.NewStyle().Width(width).Height(height).Render(content)
+}
+
+func (m *paletteModel) renderWorkflowPreview(styles paletteStyles, workflows []paletteWorkflowEntry, width, height int) string {
+	lines := []string{}
+	if len(workflows) > 0 && m.state.Selected >= 0 && m.state.Selected < len(workflows) {
+		workflow := workflows[m.state.Selected]
+		lines = append(lines, styles.panelTitle.Render("Workflow"))
+		lines = append(lines, styles.title.Render(workflow.Branch))
+		lines = append(lines, "")
+		lines = append(lines, renderPaletteStat(styles, "Status", workflow.Status, width, 7))
+		lines = append(lines, renderPaletteStat(styles, "Session", blankIfEmpty(workflow.TmuxSessionName, "-"), width, 7))
+		lines = append(lines, renderPaletteStat(styles, "Window", blankIfEmpty(workflow.TmuxWindowID, "-"), width, 7))
+		lines = append(lines, "")
+		lines = append(lines, styles.panelTitle.Render("Worktree"))
+		lines = append(lines, renderPalettePreviewValue(styles, workflow.WorktreePath, width, 0)...)
+		if workflow.Active {
+			lines = append(lines, "")
+			lines = append(lines, styles.keyword.Render("Current"))
+		}
+	}
+	content := strings.Join(lines, "\n")
+	return lipgloss.NewStyle().Width(width).Height(height).Render(content)
 }
 
 func newPaletteStyles() paletteStyles {
@@ -2180,14 +2409,14 @@ func renderPaletteModeFooter(styles paletteStyles, width int, message string, sh
 func renderPaletteFooter(styles paletteStyles, width int, message string, showAltHints bool) string {
 	return renderPaletteModeFooter(styles, width, message, showAltHints,
 		[][][2]string{
-			{{"Ctrl-U/E", "move"}, {"Ctrl-N/I", "filter"}, {"Enter", "run"}, {"Esc", "close"}, {footerHintToggleKey, "more"}},
-			{{"Ctrl-U/E", "move"}, {"Enter", "run"}, {"Esc", "close"}, {footerHintToggleKey, "more"}},
+			{{"Ctrl-K/J", "move"}, {"Ctrl-N/I", "filter"}, {"Enter", "run"}, {"Esc", "close"}, {footerHintToggleKey, "more"}},
+			{{"Ctrl-K/J", "move"}, {"Enter", "run"}, {"Esc", "close"}, {footerHintToggleKey, "more"}},
 			{{"Enter", "run"}, {"Esc", "close"}, {footerHintToggleKey, "more"}},
 		},
 		[][][2]string{
-			{{"Alt-U/E", "move"}, {"Alt-I", "run"}, {"Alt-C", "create"}, {"Alt-R", "tracker"}, {"Alt-A", "activity"}, {"Alt-P", "snippets"}, {"Alt-T", "todos"}, {"Alt-S", "close"}, {footerHintToggleKey, "hide"}},
-			{{"Alt-C", "create"}, {"Alt-R", "tracker"}, {"Alt-A", "activity"}, {"Alt-T", "todos"}, {"Alt-S", "close"}, {footerHintToggleKey, "hide"}},
-			{{"Alt-C", "create"}, {"Alt-R", "tracker"}, {"Alt-S", "close"}},
+			{{"Alt-K/J", "move"}, {"Alt-I", "run"}, {"Alt-C", "start"}, {"Alt-R", "tracker"}, {"Alt-A", "activity"}, {"Alt-P", "snippets"}, {"Alt-T", "todos"}, {"Alt-S", "close"}, {footerHintToggleKey, "hide"}},
+			{{"Alt-C", "start"}, {"Alt-R", "tracker"}, {"Alt-A", "activity"}, {"Alt-T", "todos"}, {"Alt-S", "close"}, {footerHintToggleKey, "hide"}},
+			{{"Alt-C", "start"}, {"Alt-R", "tracker"}, {"Alt-S", "close"}},
 		},
 	)
 }
@@ -2281,18 +2510,6 @@ func renderPalettePreviewValue(styles paletteStyles, value string, width int, in
 		lines = append(lines, prefix+styles.panelText.Render(truncate(part, available)))
 	}
 	return lines
-}
-
-func renderPaletteDeviceChip(styles paletteStyles, deviceID string, active bool) string {
-	chipStyle := styles.keyword
-	if active {
-		chipStyle = styles.keyword.Copy().Foreground(lipgloss.Color("223")).Background(lipgloss.Color("238")).Bold(true)
-	}
-	label := deviceID
-	if isPaletteNoDeviceOption(deviceID) {
-		label = "NONE"
-	}
-	return chipStyle.Render(label)
 }
 
 func firstPaletteLine(value string) string {

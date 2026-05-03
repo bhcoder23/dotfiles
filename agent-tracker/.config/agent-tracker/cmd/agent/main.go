@@ -2779,10 +2779,10 @@ func configPath() string {
 
 func loadAppConfig() appConfig {
 	cfg := appConfig{Keys: keyConfig{
-		MoveLeft:   "n",
-		MoveRight:  "i",
-		MoveUp:     "u",
-		MoveDown:   "e",
+		MoveLeft:   "h",
+		MoveRight:  "l",
+		MoveUp:     "k",
+		MoveDown:   "j",
 		Edit:       "Enter",
 		Cancel:     "Escape",
 		AddTodo:    "a",

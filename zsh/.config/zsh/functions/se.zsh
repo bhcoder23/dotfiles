@@ -13,5 +13,5 @@ se() {
     source "$common" || return 1
   fi
 
-  _op_run se --agent Search "$@"
+  OP_TRACKER_NOTIFY=1 _op_run se --agent Search "$@"
 }

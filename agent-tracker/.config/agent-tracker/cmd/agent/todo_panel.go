@@ -303,29 +303,31 @@ func (m *todoPanelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *todoPanelModel) updateList(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "u", "up":
-		m.moveSelection(-1)
-	case "e", "down":
-		m.moveSelection(1)
-	case "ctrl+u":
+	if isAgentCtrlPrevKey(key) {
 		return m.moveSelectedTodo(-1)
-	case "ctrl+e":
+	}
+	if isAgentCtrlNextKey(key) {
 		return m.moveSelectedTodo(1)
-	case "n", "left":
+	}
+	switch key {
+	case "k", "up":
+		m.moveSelection(-1)
+	case "j", "down":
+		m.moveSelection(1)
+	case "h", "left":
 		m.setFocusedPane(m.lastWindowPane)
 		m.clampSelections()
-	case "i", "right":
+	case "l", "right":
 		m.setFocusedPane(todoPanelPaneGlobal)
 		m.clampSelections()
 	case "tab", "shift+tab":
 		m.toggleWindowPaneFocus()
 		m.clampSelections()
-	case "N":
+	case "H":
 		if m.focusedPane == todoPanelPaneGlobal {
 			return m.transferSelectedTodo(todoScopeWindow)
 		}
-	case "I":
+	case "L":
 		if m.focusedPane == todoPanelPaneWindow || m.focusedPane == todoPanelPaneAllWindows {
 			return m.transferSelectedTodo(todoScopeGlobal)
 		}
@@ -798,11 +800,11 @@ func (m *todoPanelModel) renderFooter(w int) string {
 		)
 	} else {
 		footer = pickRenderedShortcutFooter(contentWidth, renderSegments,
-			[][2]string{{"u/e", "move"}, {"Enter", "goto"}, {"Ctrl-U/E", "reorder"}, {"n/i", "column"}, {"Tab", "window"}, {"Shift-N/I", "scope"}, {"Space", "toggle"}, {"a/Alt-A", "add"}, {"E", "edit"}, {"y", "copy"}, {"d", "delete"}, {"1/2/3", "priority"}, {"c", "completed"}, {"Esc", "close"}, {footerHintToggleKey, "more"}},
-			[][2]string{{"u/e", "move"}, {"Enter", "goto"}, {"Ctrl-U/E", "reorder"}, {"n/i", "col"}, {"Tab", "win"}, {"N/I", "scope"}, {"Space", "toggle"}, {"a/Alt-A", "add"}, {"E", "edit"}, {"y", "copy"}, {"d", "del"}, {"c", "done"}, {"Esc", "close"}, {footerHintToggleKey, "more"}},
-			[][2]string{{"u/e", "move"}, {"Enter", "goto"}, {"Ctrl-U/E", "reorder"}, {"n/i", "col"}, {"Tab", "win"}, {"N/I", "scope"}, {"Space", "toggle"}, {"a/Alt-A", "add"}, {"E", "edit"}, {"y", "copy"}, {"d", "del"}, {"Esc", "close"}, {footerHintToggleKey, "more"}},
-			[][2]string{{"u/e", "move"}, {"Enter", "goto"}, {"n/i", "col"}, {"Tab", "win"}, {"N/I", "scope"}, {"Space", "toggle"}, {"a/Alt-A", "add"}, {"E", "edit"}, {"y", "copy"}, {"d", "del"}, {"Esc", "close"}, {footerHintToggleKey, "more"}},
-			[][2]string{{"u/e", "move"}, {"Enter", "goto"}, {"n/i", "col"}, {"Tab", "win"}, {"N/I", "scope"}, {"a/Alt-A", "add"}, {"E", "edit"}, {"y", "copy"}, {"d", "del"}, {"Esc", "close"}, {footerHintToggleKey, "more"}},
+			[][2]string{{"j/k", "move"}, {"Enter", "goto"}, {"Ctrl-K/J", "reorder"}, {"h/l", "column"}, {"Tab", "window"}, {"H/L", "scope"}, {"Space", "toggle"}, {"a/Alt-A", "add"}, {"E", "edit"}, {"y", "copy"}, {"d", "delete"}, {"1/2/3", "priority"}, {"c", "completed"}, {"Esc", "close"}, {footerHintToggleKey, "more"}},
+			[][2]string{{"j/k", "move"}, {"Enter", "goto"}, {"Ctrl-K/J", "reorder"}, {"h/l", "col"}, {"Tab", "win"}, {"H/L", "scope"}, {"Space", "toggle"}, {"a/Alt-A", "add"}, {"E", "edit"}, {"y", "copy"}, {"d", "del"}, {"c", "done"}, {"Esc", "close"}, {footerHintToggleKey, "more"}},
+			[][2]string{{"j/k", "move"}, {"Enter", "goto"}, {"Ctrl-K/J", "reorder"}, {"h/l", "col"}, {"Tab", "win"}, {"H/L", "scope"}, {"Space", "toggle"}, {"a/Alt-A", "add"}, {"E", "edit"}, {"y", "copy"}, {"d", "del"}, {"Esc", "close"}, {footerHintToggleKey, "more"}},
+			[][2]string{{"j/k", "move"}, {"Enter", "goto"}, {"h/l", "col"}, {"Tab", "win"}, {"H/L", "scope"}, {"Space", "toggle"}, {"a/Alt-A", "add"}, {"E", "edit"}, {"y", "copy"}, {"d", "del"}, {"Esc", "close"}, {footerHintToggleKey, "more"}},
+			[][2]string{{"j/k", "move"}, {"Enter", "goto"}, {"h/l", "col"}, {"Tab", "win"}, {"H/L", "scope"}, {"a/Alt-A", "add"}, {"E", "edit"}, {"y", "copy"}, {"d", "del"}, {"Esc", "close"}, {footerHintToggleKey, "more"}},
 			[][2]string{{"Esc", "close"}, {footerHintToggleKey, "more"}},
 		)
 	}

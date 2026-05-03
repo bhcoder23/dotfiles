@@ -1,0 +1,31 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "build": {
+      "color": "#ff79c6"
+    },
+    "plan": {
+      "color": "#8be9fd"
+    }
+  },
+  "compaction": {
+    "auto": false
+  },
+  "provider": {
+    "tb": {
+      "npm": "@ai-sdk/openai",
+      "name": "tb-gpt",
+      "options": {
+        "baseURL": "https://yh.m7ai.com/v1"
+      },
+      "models": {
+        "gpt-5.4": {
+          "name": "gpt-5.4",
+          "options": {
+            "reasoningEffort": "xhigh"
+          }
+        }
+      }
+    }
+  }
+}

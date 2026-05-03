@@ -69,3 +69,35 @@ func previousWordBoundary(runes []rune, cursor int) int {
 	}
 	return i
 }
+
+func isAgentCtrlPrevKey(key string) bool {
+	return key == "ctrl+k"
+}
+
+func isAgentCtrlNextKey(key string) bool {
+	return key == "ctrl+j"
+}
+
+func isAgentAltPrevKey(key string) bool {
+	return key == "alt+k"
+}
+
+func isAgentAltNextKey(key string) bool {
+	return key == "alt+j"
+}
+
+func isAgentMoveUpKey(key string) bool {
+	return key == "k" || key == "up"
+}
+
+func isAgentMoveDownKey(key string) bool {
+	return key == "j" || key == "down"
+}
+
+func isAgentMoveLeftKey(key string) bool {
+	return key == "h" || key == "left"
+}
+
+func isAgentMoveRightKey(key string) bool {
+	return key == "l" || key == "right"
+}

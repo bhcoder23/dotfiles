@@ -9,6 +9,7 @@ Active packages:
 - `agent-tracker`
 - `nvim`
 - `ghostty`
+- `opencode`
 - `tmux`
 - `zsh`
 - `yazi`
@@ -44,9 +45,11 @@ Each package mirrors the target path under `$HOME`.
 Recommended userland on macOS:
 
 ```bash
-brew install stow zsh tmux neovim yazi task fzf fd ripgrep
+brew install stow zsh tmux neovim yazi task fzf fd ripgrep lazygit go node
 brew install --cask ghostty
 ```
+
+The `opencode` CLI itself is managed separately; the shipped `op` / `opr` / `se` wrappers expect `opencode` to already be on your `PATH`.
 
 ## Quick Start
 
@@ -60,7 +63,7 @@ cd ~/dotfiles
 Stow the active packages:
 
 ```bash
-stow -d ~/dotfiles -t ~ agent-tracker nvim ghostty tmux zsh yazi task
+stow -d ~/dotfiles -t ~ agent-tracker nvim ghostty opencode tmux zsh yazi task
 ```
 
 If you still need the old Fish setup, stow it explicitly:
@@ -81,19 +84,19 @@ exec zsh
 Stow all active packages:
 
 ```bash
-stow -d ~/dotfiles -t ~ agent-tracker nvim ghostty tmux zsh yazi task
+stow -d ~/dotfiles -t ~ agent-tracker nvim ghostty opencode tmux zsh yazi task
 ```
 
 Unstow all active packages:
 
 ```bash
-stow -D -d ~/dotfiles -t ~ agent-tracker nvim ghostty tmux zsh yazi task
+stow -D -d ~/dotfiles -t ~ agent-tracker nvim ghostty opencode tmux zsh yazi task
 ```
 
 Restow after local conflicts or file moves:
 
 ```bash
-stow -R -d ~/dotfiles -t ~ agent-tracker nvim ghostty tmux zsh yazi task
+stow -R -d ~/dotfiles -t ~ agent-tracker nvim ghostty opencode tmux zsh yazi task
 ```
 
 Build and start `agent-tracker` after stowing:
@@ -114,6 +117,8 @@ Build and start `agent-tracker` after stowing:
 
 - Main config lives at `tmux/.tmux.conf`.
 - Prefix is `Ctrl-s`.
+- Session / window / pane / Agent / Todos shortcuts cheat sheet lives at `docs/tmux-cheatsheet.md`.
+- Workflow lifecycle is driven by `flow` or `Option+s` → `Workflows`.
 - If you want `tmux-resurrect` / `tmux-continuum`, install TPM once:
 
 ```bash
@@ -142,6 +147,18 @@ tmux source-file ~/.tmux.conf
 brew services list | rg agent-tracker-server
 ```
 
+### OpenCode
+
+- Config lives at `opencode/.config/opencode`.
+- Use `op` if you want tmux / tracker status icons.
+- `se` and `opr` also forward tracker status now.
+- If plugins or tools are missing on a fresh machine:
+
+```bash
+cd ~/.config/opencode
+npm install
+```
+
 ### Neovim
 
 - `lazy.nvim` installs missing plugins automatically on first start.
@@ -151,6 +168,25 @@ brew services list | rg agent-tracker-server
 
 - Current terminal theme is `Catppuccin Mocha`.
 - Reload config with `Cmd-r` or reopen Ghostty.
+
+## Smoke Checks
+
+Run these after stowing or after a larger config change:
+
+```bash
+zsh -ic 'whence -w flow op opr se'
+~/.local/bin/flow --help
+python3 -m py_compile ~/dotfiles/tmux/.config/tmux/scripts/flow.py
+tmux source-file ~/.tmux.conf
+~/.config/agent-tracker/install.sh
+```
+
+Quick manual checks:
+
+- Inside tmux, press `Option+s` and confirm `Workflows` opens.
+- Run `flow list --all` and confirm your workflow registry renders.
+- Run `flow doctor --all` and confirm health output makes sense.
+- In a workflow pane, start `op` and confirm tracker state still updates.
 
 ## Conventions
 

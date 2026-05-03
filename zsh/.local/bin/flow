@@ -1,0 +1,4 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+exec python3 "${XDG_CONFIG_HOME:-$HOME/.config}/tmux/scripts/flow.py" "$@"

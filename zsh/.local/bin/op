@@ -1,0 +1,13 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+functions_dir="${XDG_CONFIG_HOME:-$HOME/.config}/zsh/functions"
+common="$functions_dir/_op_common.zsh"
+
+if [[ ! -f "$common" ]]; then
+  print -u2 "op: missing _op_common.zsh at $common"
+  exit 1
+fi
+
+source "$common"
+OP_TRACKER_NOTIFY="${OP_TRACKER_NOTIFY:-1}" _op_run op "$@"

@@ -152,13 +152,15 @@ func (m *trackerPanelModel) updateNormal(key string) (tea.Model, tea.Cmd) {
 	if m.helpVisible {
 		return m, nil
 	}
-	switch key {
-	case "u", "up", "ctrl+u":
+	if isAgentMoveUpKey(key) || isAgentCtrlPrevKey(key) {
 		m.moveSelection(-1)
 		return m, nil
-	case "e", "down", "ctrl+e":
+	}
+	if isAgentMoveDownKey(key) || isAgentCtrlNextKey(key) {
 		m.moveSelection(1)
 		return m, nil
+	}
+	switch key {
 	case "enter", "p":
 		return m.runPrimaryAction()
 	case "c":
@@ -315,7 +317,7 @@ func (m *trackerPanelModel) renderTaskDetailSection(styles paletteStyles, width,
 
 func (m *trackerPanelModel) renderHelp(styles paletteStyles, width, height int) string {
 	lines := []string{
-		"u and e move through tasks. enter opens the highlighted tmux pane.",
+		"j and k move through tasks. enter opens the highlighted tmux pane.",
 		"c settles a task. shift-d deletes it. esc returns to the command palette.",
 	}
 	styled := make([]string, 0, len(lines))
@@ -337,8 +339,8 @@ func (m *trackerPanelModel) renderFooter(styles paletteStyles, width int) string
 		)
 	} else {
 		footer = pickRenderedShortcutFooter(width, renderSegments,
-			[][2]string{{"u/e", "move"}, {"Enter", "open"}, {"c", "settle"}, {"Shift-D", "delete"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
-			[][2]string{{"u/e", "move"}, {"Enter", "open"}, {"c", "settle"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
+			[][2]string{{"j/k", "move"}, {"Enter", "open"}, {"c", "settle"}, {"Shift-D", "delete"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
+			[][2]string{{"j/k", "move"}, {"Enter", "open"}, {"c", "settle"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
 			[][2]string{{"Esc", "back"}, {footerHintToggleKey, "more"}},
 		)
 	}

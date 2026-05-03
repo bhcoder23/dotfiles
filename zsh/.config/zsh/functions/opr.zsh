@@ -50,5 +50,5 @@ opr() {
     source "$common" || return 1
   fi
 
-  _op_run op --session "$session_id" "$@"
+  OP_TRACKER_NOTIFY=1 _op_run op --session "$session_id" "$@"
 }

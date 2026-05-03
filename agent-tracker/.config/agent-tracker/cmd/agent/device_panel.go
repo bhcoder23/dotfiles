@@ -76,12 +76,24 @@ func (m *devicePanelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *devicePanelModel) updateList(key string) (tea.Model, tea.Cmd) {
+	if isAgentCtrlPrevKey(key) {
+		m.selected = clampInt(m.selected-1, 0, len(m.devices)-1)
+		return m, nil
+	}
+	if isAgentCtrlNextKey(key) {
+		m.selected = clampInt(m.selected+1, 0, len(m.devices)-1)
+		return m, nil
+	}
 	switch key {
 	case "esc":
 		m.requestBack = true
-	case "ctrl+u", "alt+u", "up", "u":
+	case "alt+k":
 		m.selected = clampInt(m.selected-1, 0, len(m.devices)-1)
-	case "ctrl+e", "alt+e", "down", "e":
+	case "alt+j":
+		m.selected = clampInt(m.selected+1, 0, len(m.devices)-1)
+	case "up", "k":
+		m.selected = clampInt(m.selected-1, 0, len(m.devices)-1)
+	case "down", "j":
 		m.selected = clampInt(m.selected+1, 0, len(m.devices)-1)
 	case "a":
 		m.mode = devicePanelModeAdd
@@ -262,8 +274,8 @@ func (m *devicePanelModel) renderFooter(styles paletteStyles, width int) string 
 		)
 	} else {
 		footer = pickRenderedShortcutFooter(width, renderSegments,
-			[][2]string{{"u/e", "move"}, {"a", "add"}, {"d", "remove"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
-			[][2]string{{"u/e", "move"}, {"a", "add"}, {"d", "remove"}, {footerHintToggleKey, "more"}},
+			[][2]string{{"j/k", "move"}, {"a", "add"}, {"d", "remove"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
+			[][2]string{{"j/k", "move"}, {"a", "add"}, {"d", "remove"}, {footerHintToggleKey, "more"}},
 			[][2]string{{"Esc", "back"}, {footerHintToggleKey, "more"}},
 		)
 	}

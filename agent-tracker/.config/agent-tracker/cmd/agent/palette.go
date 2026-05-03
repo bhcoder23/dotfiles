@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +14,7 @@ const (
 	paletteModeList paletteMode = iota
 	paletteModePrompt
 	paletteModeConfirmDestroy
+	paletteModeWorkflows
 	paletteModeSnippets
 	paletteModeSnippetVars
 	paletteModeTodos
@@ -24,27 +24,21 @@ const (
 	paletteModeTracker
 )
 
-type palettePromptField int
-
-const (
-	palettePromptFieldName palettePromptField = iota
-	palettePromptFieldDevice
-	palettePromptFieldWorktree
-)
-
 type palettePromptKind int
 
 const (
-	palettePromptStartAgent palettePromptKind = iota
+	palettePromptStartFlow palettePromptKind = iota
 	palettePromptSnippetVar
 )
 
 type paletteActionKind int
 
 const (
-	paletteActionPromptStartAgent paletteActionKind = iota
+	paletteActionPromptStartFlow paletteActionKind = iota
+	paletteActionOpenWorkflows
+	paletteActionResumeFlow
+	paletteActionFlowDestroy
 	paletteActionOpenActivityMonitor
-	paletteActionConfirmDestroy
 	paletteActionReloadTmuxConfig
 	paletteActionOpenStatusRight
 	paletteActionOpenSnippets
@@ -73,12 +67,10 @@ const (
 )
 
 type paletteResult struct {
-	Kind         paletteResultKind
-	Action       paletteAction
-	Input        string
-	Device       string
-	KeepWorktree bool
-	State        paletteUIState
+	Kind   paletteResultKind
+	Action paletteAction
+	Input  string
+	State  paletteUIState
 }
 
 type paletteUIState struct {
@@ -86,19 +78,21 @@ type paletteUIState struct {
 	FilterCursor        int
 	Selected            int
 	ActionOffset        int
+	WorkflowOffset      int
 	SnippetOffset       int
 	Mode                paletteMode
 	PromptText          []rune
 	PromptCursor        int
 	PromptKind          palettePromptKind
-	PromptField         palettePromptField
 	PromptRepoRoot      string
-	PromptDevices       []string
-	PromptDeviceIndex   int
-	PromptKeepWorktree  bool
+	PromptReturnMode    paletteMode
 	ShowAltHints        bool
 	Message             string
 	ConfirmRequiresText bool
+	ConfirmRepoRoot     string
+	ConfirmBranch       string
+	ConfirmWindowID     string
+	ConfirmReturnMode   paletteMode
 	SnippetName         string
 	SnippetContent      string
 	SnippetVars         []string
@@ -113,6 +107,37 @@ type snippet struct {
 	Description string
 	Content     string
 	Vars        []string
+}
+
+type flowRegistry struct {
+	Version   int                    `json:"version"`
+	Workflows map[string]*flowRecord `json:"workflows"`
+}
+
+type flowRecord struct {
+	Key             string `json:"key"`
+	RepoRoot        string `json:"repo_root"`
+	RepoName        string `json:"repo_name"`
+	Branch          string `json:"branch"`
+	WorktreePath    string `json:"worktree_path"`
+	TmuxSessionID   string `json:"tmux_session_id"`
+	TmuxSessionName string `json:"tmux_session_name"`
+	TmuxWindowID    string `json:"tmux_window_id"`
+	PaneAI          string `json:"pane_ai"`
+	PaneGit         string `json:"pane_git"`
+	PaneRun         string `json:"pane_run"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
+}
+
+type paletteWorkflowEntry struct {
+	RepoRoot        string
+	Branch          string
+	Status          string
+	WorktreePath    string
+	TmuxSessionName string
+	TmuxWindowID    string
+	Active          bool
 }
 
 var snippetVarRegex = regexp.MustCompile(`\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}`)
@@ -215,7 +240,7 @@ func detectPaletteMainRepoRoot(currentPath string, record *agentRecord) string {
 	if idx := strings.Index(repoRoot, needle); idx >= 0 {
 		return repoRoot[:idx]
 	}
-	return ""
+	return repoRoot
 }
 
 func detectPaletteAgentIDFromPath(currentPath string) string {
@@ -242,16 +267,6 @@ func detectPaletteAgentIDFromPath(currentPath string) string {
 func looksLikeTmuxFormatLiteral(value string) bool {
 	value = strings.TrimSpace(value)
 	return strings.Contains(value, "#{") && strings.Contains(value, "}")
-}
-
-func startAgentSubtitle(mainRepoRoot, currentPath string) string {
-	if strings.TrimSpace(mainRepoRoot) == "" {
-		return "No agent-enabled repo detected for this pane"
-	}
-	if filepath.Clean(strings.TrimSpace(mainRepoRoot)) == filepath.Clean(strings.TrimSpace(currentPath)) {
-		return "Open a small prompt here to start a new agent"
-	}
-	return fmt.Sprintf("Open a small prompt in %s", mainRepoRoot)
 }
 
 func runPalette(args []string) error {

@@ -235,10 +235,10 @@ func (m *activityMonitorBT) updateCopyMenu(key string) (tea.Model, tea.Cmd) {
 		m.copyOptions = nil
 		m.copyOptionIndex = 0
 		return m, nil
-	case "u", "up", "ctrl+u":
+	case "k", "up", "ctrl+k":
 		m.copyOptionIndex = clampInt(m.copyOptionIndex-1, 0, len(m.copyOptions)-1)
 		return m, nil
-	case "e", "down", "ctrl+e":
+	case "j", "down", "ctrl+j":
 		m.copyOptionIndex = clampInt(m.copyOptionIndex+1, 0, len(m.copyOptions)-1)
 		return m, nil
 	case "enter", "y", "Y":
@@ -274,19 +274,19 @@ func (m *activityMonitorBT) updateNormal(key string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	switch key {
-	case "u", "up":
+	case "k", "up":
 		m.moveSelection(-1)
-	case "e", "down":
+	case "j", "down":
 		m.moveSelection(1)
-	case "n", "left":
+	case "h", "left":
 		m.shiftSort(-1)
-	case "i", "right":
+	case "l", "right":
 		m.shiftSort(1)
 	case "a":
 		m.showAllProcesses = !m.showAllProcesses
 		m.resortRows()
 		return m, activityRequestRefreshBT(true, false, m)
-	case "l":
+	case "L":
 		m.lockSelection = !m.lockSelection
 		if !m.lockSelection {
 			m.resortRows()
@@ -298,9 +298,9 @@ func (m *activityMonitorBT) updateNormal(key string) (tea.Model, tea.Cmd) {
 		m.setSort(activitySortCPU)
 	case "m":
 		m.setSort(activitySortMemory)
-	case "j":
+	case "J":
 		m.setSort(activitySortDownload)
-	case "k":
+	case "K":
 		m.setSort(activitySortUpload)
 	case "o":
 		m.setSort(activitySortPorts)
@@ -434,7 +434,7 @@ func (m *activityMonitorBT) View() string {
 			"",
 			strings.Join(rows, "\n"),
 			"",
-			m.styles.modalHint.Render("u/e move  enter copy  1-9 direct  esc cancel"),
+			m.styles.modalHint.Render("j/k move  enter copy  1-9 direct  esc cancel"),
 		)
 		box := m.styles.modal.Width(minInt(48, maxInt(30, w-10))).Render(modal)
 		result = lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box, lipgloss.WithWhitespaceChars(" "), lipgloss.WithWhitespaceBackground(lipgloss.Color("235")))
@@ -648,9 +648,9 @@ func (m *activityMonitorBT) renderFooter(width int) string {
 		)
 	} else {
 		footer = pickRenderedShortcutFooter(width, renderSegments,
-			[][2]string{{"u/e", "move"}, {"n/i", "sort"}, {"j/k", "net"}, {"a", "scope"}, {"l", "follow"}, {"r", "reverse"}, {"Enter", "tmux"}, {"d", "kill"}, {"y", "copy"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
-			[][2]string{{"u/e", "move"}, {"n/i", "sort"}, {"j/k", "net"}, {"a", "scope"}, {"Enter", "tmux"}, {"d", "kill"}, {"y", "copy"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
-			[][2]string{{"u/e", "move"}, {"Enter", "tmux"}, {"y", "copy"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
+			[][2]string{{"j/k", "move"}, {"h/l", "sort"}, {"J/K", "net"}, {"a", "scope"}, {"L", "follow"}, {"r", "reverse"}, {"Enter", "tmux"}, {"d", "kill"}, {"y", "copy"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
+			[][2]string{{"j/k", "move"}, {"h/l", "sort"}, {"J/K", "net"}, {"a", "scope"}, {"Enter", "tmux"}, {"d", "kill"}, {"y", "copy"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
+			[][2]string{{"j/k", "move"}, {"Enter", "tmux"}, {"y", "copy"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
 		)
 	}
 	return lipgloss.NewStyle().Width(width).Render(footer)

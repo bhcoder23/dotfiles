@@ -81,12 +81,25 @@ func (m *statusRightPanelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.showAltHints = false
-		switch msg.String() {
+		key := msg.String()
+		if isAgentCtrlPrevKey(key) {
+			m.selected = clampInt(m.selected-1, 0, maxInt(0, len(m.entries)-1))
+			return m, nil
+		}
+		if isAgentCtrlNextKey(key) {
+			m.selected = clampInt(m.selected+1, 0, maxInt(0, len(m.entries)-1))
+			return m, nil
+		}
+		switch key {
 		case "esc":
 			m.requestBack = true
-		case "ctrl+u", "alt+u", "up", "u":
+		case "alt+k":
 			m.selected = clampInt(m.selected-1, 0, maxInt(0, len(m.entries)-1))
-		case "ctrl+e", "alt+e", "down", "e":
+		case "alt+j":
+			m.selected = clampInt(m.selected+1, 0, maxInt(0, len(m.entries)-1))
+		case "up", "k":
+			m.selected = clampInt(m.selected-1, 0, maxInt(0, len(m.entries)-1))
+		case "down", "j":
 			m.selected = clampInt(m.selected+1, 0, maxInt(0, len(m.entries)-1))
 		case "enter", " ":
 			m.toggleSelected()
@@ -275,8 +288,8 @@ func (m *statusRightPanelModel) renderFooter(styles paletteStyles, width int) st
 		)
 	} else {
 		footer = pickRenderedShortcutFooter(width, renderSegments,
-			[][2]string{{"u/e", "move"}, {"Enter", "toggle"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
-			[][2]string{{"u/e", "move"}, {"Enter", "toggle"}, {footerHintToggleKey, "more"}},
+			[][2]string{{"j/k", "move"}, {"Enter", "toggle"}, {"Esc", "back"}, {footerHintToggleKey, "more"}},
+			[][2]string{{"j/k", "move"}, {"Enter", "toggle"}, {footerHintToggleKey, "more"}},
 			[][2]string{{"Esc", "back"}, {footerHintToggleKey, "more"}},
 		)
 	}
