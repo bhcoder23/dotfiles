@@ -89,6 +89,26 @@ def command_switch(index_str: str) -> None:
     run_tmux(["refresh-client", "-S"], check=False)
 
 
+def command_focus(direction: str) -> None:
+    direction = direction.lower()
+    sessions = list_sessions()
+    current_id = current_session_id()
+    indices = {session["id"]: idx for idx, session in enumerate(sessions)}
+    if current_id not in indices:
+        return
+    pos = indices[current_id]
+    if direction == "left":
+        target_pos = pos - 1
+    elif direction == "right":
+        target_pos = pos + 1
+    else:
+        return
+    if target_pos < 0 or target_pos >= len(sessions):
+        return
+    run_tmux(["switch-client", "-t", sessions[target_pos]["id"]], check=False)
+    run_tmux(["refresh-client", "-S"], check=False)
+
+
 def command_rename(label: str) -> None:
     label = sanitize_label(label)
     current_id = current_session_id()
@@ -177,6 +197,8 @@ def main(argv: List[str]) -> None:
     command = argv[1]
     if command == "switch" and len(argv) >= 3:
         command_switch(argv[2])
+    elif command == "focus" and len(argv) >= 3:
+        command_focus(argv[2])
     elif command == "rename" and len(argv) >= 3:
         command_rename(argv[2])
     elif command == "move" and len(argv) >= 3:

@@ -49,10 +49,10 @@
 - New side session from current path: `Option+Shift+s`
 - Rename current session: `prefix + .`
 - Session chooser: `prefix + s`
-- Previous / next session: `Option+p` / `Option+n`
+- Left / right adjacent session: `Option+p` / `Option+n`（不循环）
 - Direct session 1-9: `F1` .. `F9`
 - Alternate direct session 1-9: `Ctrl+1` .. `Ctrl+9`
-- Move current session left / right in the session bar: `prefix + [` / `prefix + ]`
+- Move current session left / right in the session bar: `prefix + {` / `prefix + }`
 
 ### Close / Inspect
 

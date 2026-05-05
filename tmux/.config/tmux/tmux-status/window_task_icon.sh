@@ -6,6 +6,8 @@ unread="${2:-0}"
 watching="${3:-0}"
 [[ -z "$window_id" ]] && exit 0
 
+session_id=$(tmux display-message -p -t "$window_id" '#{session_id}' 2>/dev/null || true)
+
 has_bell=0
 has_watch=0
 has_question=0
@@ -21,8 +23,8 @@ CACHE_FILE="/tmp/tmux-tracker-cache.json"
 if [[ -f "$CACHE_FILE" ]] && command -v jq >/dev/null 2>&1; then
   state=$(cat "$CACHE_FILE" 2>/dev/null || true)
   if [[ -n "$state" ]]; then
-    result=$(echo "$state" | jq -r --arg wid "$window_id" '
-      .tasks // [] | .[] | select(.window_id == $wid) |
+    result=$(echo "$state" | jq -r --arg wid "$window_id" --arg sid "$session_id" '
+      .tasks // [] | .[] | select(.window_id == $wid and ($sid == "" or .session_id == $sid)) |
       if .status == "completed" and .acknowledged != true then "waiting"
       elif .status == "in_progress" then "in_progress"
       else empty end

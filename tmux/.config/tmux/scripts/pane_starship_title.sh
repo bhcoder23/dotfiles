@@ -118,37 +118,4 @@ if ! opencode_active; then
   exit 0
 fi
 
-summary_display=""
-if [[ -n "$theme" ]]; then
-  summary_display="[$theme]"
-fi
-if [[ -n "$now" ]]; then
-  if [[ -n "$summary_display" ]]; then
-    summary_display="$summary_display  ↳ $now"
-  else
-    summary_display="↳ $now"
-  fi
-fi
-
-if [[ -z "$summary_display" ]]; then
-  printf '%s' "$(trim_to_width "$title" "$width")"
-  exit 0
-fi
-
-if [[ "$pane_watching" == "1" ]]; then
-  summary_display="⏳ $summary_display"
-  title=${title#⏳ }
-fi
-
-reserved_width=$((${#summary_display} + 3))
-prompt_width=$((width - reserved_width))
-if (( prompt_width < 16 )); then
-  printf '%s' "$(trim_to_width "$summary_display" "$width")"
-  exit 0
-fi
-
-if command -v starship >/dev/null 2>&1; then
-  title=$(cd "$pane_path" && run_starship "$prompt_width") || title=$(fallback)
-fi
-
-printf '%s' "$(trim_to_width "$summary_display · $title" "$width")"
+printf '%s' "$(trim_to_width "$title" "$width")"
