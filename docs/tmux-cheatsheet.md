@@ -81,12 +81,12 @@ tmux kill-server
 
 ### Split / Focus / Close
 
-- Split left / down / up / right: `prefix + h/j/k/l`
+- Create pane by splitting current pane left / down / up / right: `prefix + h/j/k/l`
 - Focus pane left / down / up / right: `Option+h/j/k/l`
 - Focus helper panes: `Option+a` left, `Option+g` top-right, `Option+r` bottom-right
 - Break current pane into its own window: `Option+Shift+o`
 - Close current pane: `Option+q`
-- Toggle zoom: `Option+f`
+- Toggle zoom for current pane: `Option+f`
 
 ### Resize / Layout
 
