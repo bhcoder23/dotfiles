@@ -1,5 +1,5 @@
 
-theme = Catppuccin Mocha
+theme = koda-dark
 shell-integration = zsh
 shell-integration-features = no-cursor
 
@@ -26,7 +26,7 @@ window-padding-y = 0,0
 window-padding-balance = true
 # cursor-style = underline
 cursor-style-blink = true
-cursor-color = #B6F500
+cursor-color = #d9ba73
 cursor-opacity = 0.85
 
 background-opacity = 0.96

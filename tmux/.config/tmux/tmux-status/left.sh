@@ -9,12 +9,27 @@ status_bg="${4:-}"
 [[ -z "$status_bg" || "$status_bg" == "default" ]] && status_bg=black
 [[ ! "$term_width" =~ ^[0-9]+$ ]] && term_width=100
 
-inactive_bg="#373b41"
-inactive_fg="#c5c8c6"
-active_bg="${TMUX_THEME_COLOR:-#b294bb}"
-active_fg="#1d1f21"
+tmux_option() {
+  tmux show -gqv "$1" 2>/dev/null || true
+}
+
+theme_bg="$(tmux_option @theme_bg)"
+theme_surface="$(tmux_option @theme_surface)"
+theme_fg="$(tmux_option @theme_fg)"
+theme_color="$(tmux_option @theme_color)"
+
+[[ -z "$theme_bg" ]] && theme_bg="#090909"
+[[ -z "$theme_surface" ]] && theme_surface="#1a1a1a"
+[[ -z "$theme_fg" ]] && theme_fg="#b0b0b0"
+[[ -z "$theme_color" ]] && theme_color="#d9ba73"
+[[ "$status_bg" == "black" ]] && status_bg="$theme_bg"
+
+inactive_bg="$theme_surface"
+inactive_fg="$theme_fg"
+active_bg="${TMUX_THEME_COLOR:-$theme_color}"
+active_fg="$theme_bg"
 separator=""
-left_cap="█"
+left_cap=""
 max_width=18
 
 left_narrow_width=${TMUX_LEFT_NARROW_WIDTH:-80}
