@@ -15,6 +15,16 @@ function M.setup()
 		end,
 	})
 
+	-- New files created from nvim-tree exist on disk before they are opened,
+	-- so handle both fresh buffers and empty files read from disk.
+	vim.api.nvim_create_autocmd({ "BufNewFile", "BufReadPost" }, {
+		group = group,
+		pattern = "*.go",
+		callback = function(args)
+			require("salar.tools.skeleton").insert_go_package(args.buf)
+		end,
+	})
+
 	-- Typst auto-compile
 	local typst_job = nil
 

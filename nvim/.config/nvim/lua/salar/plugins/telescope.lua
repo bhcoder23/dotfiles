@@ -23,10 +23,17 @@ return {
 				path_display = { "smart" },
 				mappings = {
 					i = {
+						["<Esc>"] = actions.close,
+						["<C-c>"] = actions.close,
 						["<C-k>"] = actions.move_selection_previous,
 						["<C-j>"] = actions.move_selection_next,
 						["<C-q>"] = actions.send_selected_to_qflist + actions.open_qflist,
 						["<C-t>"] = require("trouble.sources.telescope").open,
+					},
+					n = {
+						["<Esc>"] = actions.close,
+						["<C-c>"] = actions.close,
+						["q"] = actions.close,
 					},
 				},
 			},

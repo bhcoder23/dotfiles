@@ -59,6 +59,69 @@ local function current_file_path()
 	return normalize(vim.fn.expand("%:p"))
 end
 
+local function buffer_is_empty(bufnr)
+	bufnr = bufnr or 0
+	return vim.api.nvim_buf_line_count(bufnr) == 1
+		and vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] == ""
+end
+
+local function go_package_from_sibling(file_path)
+	local dir = vim.fn.fnamemodify(file_path, ":h")
+	local files = vim.fn.globpath(dir, "*.go", false, true)
+
+	for _, path in ipairs(files) do
+		path = normalize(path)
+		if path ~= file_path and vim.fn.filereadable(path) == 1 then
+			local ok, lines = pcall(vim.fn.readfile, path, "", 20)
+			if ok then
+				for _, line in ipairs(lines) do
+					local package_name = line:match("^%s*package%s+([%w_]+)")
+					if package_name then
+						return package_name
+					end
+				end
+			end
+		end
+	end
+
+	return nil
+end
+
+local function sanitize_go_package(name)
+	local package_name = (name or ""):gsub("[^%w_]", "_")
+
+	if package_name == "" then
+		return "main"
+	end
+
+	if package_name:match("^%d") then
+		package_name = "_" .. package_name
+	end
+
+	return package_name
+end
+
+local function go_package_name(file_path)
+	local sibling_package = go_package_from_sibling(file_path)
+	if sibling_package then
+		return sibling_package
+	end
+
+	if vim.fn.fnamemodify(file_path, ":t") == "main.go" then
+		return "main"
+	end
+
+	local dir = vim.fn.fnamemodify(file_path, ":h:t")
+	return sanitize_go_package(dir)
+end
+
+local function go_skeleton_lines(file_path)
+	return {
+		"package " .. go_package_name(file_path),
+		"",
+	}
+end
+
 local function strip_known_prefix(relpath)
 	if not relpath then
 		return nil
@@ -451,12 +514,30 @@ function M.insert()
 			"",
 			"}",
 		}
+	elseif ext == "go" then
+		lines = go_skeleton_lines(file_path)
 	else
 		vim.notify("Skel: unsupported file type", vim.log.levels.WARN)
 		return
 	end
 
 	vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+end
+
+function M.insert_go_package(bufnr)
+	bufnr = bufnr or 0
+
+	if vim.bo[bufnr].buftype ~= "" or not vim.bo[bufnr].modifiable then
+		return false
+	end
+
+	local file_path = normalize(vim.api.nvim_buf_get_name(bufnr))
+	if file_path == "" or not file_path:match("%.go$") or not buffer_is_empty(bufnr) then
+		return false
+	end
+
+	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, go_skeleton_lines(file_path))
+	return true
 end
 
 return M

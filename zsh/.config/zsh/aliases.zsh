@@ -29,6 +29,7 @@ alias vim='nvim'
 alias gs='git config credential.helper store'
 alias ac='sudo tlp ac'
 alias gy='git-yolo'
+alias godot='/Applications/Godot.app/Contents/MacOS/Godot'
 alias nb='newsboat -r'
 alias nt="sh -c 'cd $(pwd); st' > /dev/null 2>&1 &"
 alias ta='tmux a'

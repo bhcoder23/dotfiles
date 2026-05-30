@@ -14,6 +14,7 @@ opt.autoindent = true
 opt.smartindent = true
 opt.copyindent = true
 opt.preserveindent = true
+opt.pumheight = 8
 
 opt.wrap = false
 
@@ -39,9 +40,18 @@ opt.foldmarker = "#pragma region,#pragma endregion"
 vim.api.nvim_create_autocmd("FileType", {
 	callback = function(args)
 		local bo = vim.bo[args.buf]
-		bo.tabstop = 4
-		bo.shiftwidth = 4
-		bo.softtabstop = 4
+		local two_space_filetypes = {
+			c = true,
+			cpp = true,
+			cuda = true,
+			objc = true,
+			objcpp = true,
+		}
+		local indent = two_space_filetypes[bo.filetype] and 2 or 4
+
+		bo.tabstop = indent
+		bo.shiftwidth = indent
+		bo.softtabstop = indent
 		bo.expandtab = true
 		bo.autoindent = true
 		bo.smartindent = true
